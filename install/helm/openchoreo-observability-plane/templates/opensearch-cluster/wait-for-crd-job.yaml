@@ -1,0 +1,37 @@
+{{- if and (or (eq .Values.global.installationMode "singleCluster") (eq .Values.global.installationMode "multiCluster")) (index .Values "opensearch-operator" "enabled") }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wait-for-opensearch-crd
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    {{- include "openchoreo-observability-plane.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: wait-for-opensearch-crd
+      containers:
+      - name: wait-for-crd
+        image: {{ .Values.waitJob.image }}
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Waiting for OpenSearchCluster CRD to be ready..."
+
+          # Wait for OpenSearchCluster CRD
+          until kubectl get crd opensearchclusters.opensearch.opster.io >/dev/null 2>&1; do
+            echo "Waiting for OpenSearchCluster CRD..."
+            sleep 5
+          done
+
+          echo "OpenSearchCluster CRD is ready!"
+{{- end }}
