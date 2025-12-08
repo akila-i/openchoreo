@@ -52,6 +52,14 @@ ports:
 options:
   k3s:
     extraArgs:
+      # # *** ESSENTIAL ARGUMENT TO DISABLE FLANNEL CNI ***
+      # - arg: "--flannel-backend=none"
+      #   nodeFilters:
+      #     - server:*
+      # # Disable embedded Network Policy Controller (optional, but recommended to avoid conflicts with custom CNI's network policy engine)
+      # - arg: "--disable-network-policy"
+      #   nodeFilters:
+      #     - server:*
       # Add host.k3d.internal to API server TLS certificate SANs.
       # This allows consistent DataPlane configuration across single and multi-cluster setups
       # where Control Plane pods can access the API server via host.k3d.internal:6550

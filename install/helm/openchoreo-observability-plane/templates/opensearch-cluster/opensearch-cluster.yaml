@@ -17,6 +17,10 @@ spec:
     enable: {{ .Values.openSearchCluster.dashboards.enable }}
     version: {{ .Values.openSearchCluster.dashboards.version | quote }}
     replicas: {{ .Values.openSearchCluster.dashboards.replicas }}
+    opensearchCredentialsSecret:
+      name: opensearch-admin-credentials-secret
+    additionalConfig:
+      opensearch.ssl.verificationMode: none
   general:
     serviceName: opensearch
     version: {{ .Values.openSearchCluster.general.version | quote }}
