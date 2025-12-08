@@ -37,7 +37,7 @@ spec:
     projectName: default
   containers:
     main:
-      image: "ghcr.io/openchoreo/samples/greeter-service:latest"
+      image: akila99g/greeter-with-log:v1.0.0
       command:
         - ./go-greeter
       args:
@@ -74,4 +74,3 @@ spec:
       remoteRef:
         key: github-pat
   refreshInterval: 1h
-

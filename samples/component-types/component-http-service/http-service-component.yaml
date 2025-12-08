@@ -131,7 +131,7 @@ spec:
 
   containers:
     app:
-      image: "ghcr.io/openchoreo/samples/greeter-service:latest"
+      image: "akila99g/greeter-with-log:v1.0.0"
       args:
         - --port
         - "9090"

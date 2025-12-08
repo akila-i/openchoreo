@@ -232,7 +232,7 @@ spec:
   autoDeploy: true
 
   parameters:
-    replicas: 2
+    replicas: 1
     port: 8080
 
 ---
@@ -248,15 +248,21 @@ spec:
 
   containers:
     main:
-      image: "nginx:1.25-alpine"
+      image: "akila99g/trace-sim:v0.0.1"
       env:
-        - key: LOG_LEVEL
-          value: info
-        - key: DATABASE_PASSWORD
-          valueFrom:
-            secretRef:
-              name: database-secret
-              key: password
+        # - key: OTLP_ENDPOINT
+        - key: TRACE_ENDPOINT
+          value: "http://opentelemetry-collector.openchoreo-observability-plane.svc.cluster.local:4318/v1/traces"
+        - key: DURATION
+          value: "10m"
+        - key: RATE
+          value: "1"
+        - key: MIN_DEPTH
+          value: "5"
+        - key: MAX_DEPTH
+          value: "20"
+        - key: INTERVAL
+          value: "10"
       files:
         - key: application.toml
           mountPath: /conf
@@ -284,15 +290,9 @@ spec:
   workloadOverrides:
     containers:
       main:
-        env:
-          - key: FEATURE_FLAG
-            value: "true"
-          - key: NEW_ENV_VAR
-            value: new_value
         files:
         - key: application.toml
           mountPath: /conf
           value: |
             schema_generation:
               enable: false
-
