@@ -25,3 +25,45 @@ clusterGateway:
 controllerManager:
   clusterGateway:
     enabled: true
+  image:
+    tag: latest-dev
+
+openchoreoApi:
+  logLevel: info
+  ingress:
+    enabled: true
+    hosts:
+      - host: api.openchoreo.localhost
+        paths:
+          - path: /
+            pathType: Prefix
+
+backstage:
+  enabled: true
+  image:
+    tag: latest-dev
+  ingress:
+    enabled: true
+    hosts:
+      - host: openchoreo.localhost
+        paths:
+          - path: /
+            pathType: Prefix
+  baseUrl: http://openchoreo.localhost:8080
+
+asgardeoThunder:
+  ingress:
+    enabled: true
+    hosts:
+      - host: thunder.openchoreo.localhost
+        paths:
+          - path: /
+            pathType: Prefix
+            port: 8090
+
+  backstagePortal:
+    enabled: true
+    redirectUrls:
+      - "http://localhost:3000/api/auth/default-idp/handler/frame"
+      - "http://localhost:7007/api/auth/default-idp/handler/frame"
+      - "http://openchoreo.localhost:8080/api/auth/default-idp/handler/frame"
