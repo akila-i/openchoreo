@@ -381,3 +381,48 @@ func (c *Client) WriteAlertEntry(ctx context.Context, entry map[string]interface
 	c.logger.Debug("Alert entry written", "alert_id", parsed.ID)
 	return parsed.ID, nil
 }
+
+// SearchAlerts searches for alert entries in the alerts index
+func (c *Client) SearchAlerts(ctx context.Context, query map[string]interface{}) (*SearchResponse, error) {
+	c.logger.Debug("Searching alerts", "index", alertsIndexName)
+
+	if c.logger.Enabled(ctx, slog.LevelDebug) {
+		queryJSON, err := json.MarshalIndent(query, "", "  ")
+		if err == nil {
+			fmt.Println("OpenSearch Alert Search Query:")
+			fmt.Println(string(queryJSON))
+		}
+	}
+
+	req := opensearchapi.SearchRequest{
+		Index:             []string{alertsIndexName},
+		Body:              buildSearchBody(query),
+		IgnoreUnavailable: opensearchapi.BoolPtr(true),
+	}
+
+	res, err := req.Do(ctx, c.client)
+	if err != nil {
+		c.logger.Error("Alert search request failed", "error", err)
+		return nil, fmt.Errorf("alert search request failed: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.IsError() {
+		c.logger.Error("Alert search request returned error",
+			"status", res.Status(),
+			"error", res.String())
+		return nil, fmt.Errorf("alert search request failed with status: %s", res.Status())
+	}
+
+	response, err := parseSearchResponse(res.Body)
+	if err != nil {
+		c.logger.Error("Failed to parse alert search response", "error", err)
+		return nil, fmt.Errorf("failed to parse alert search response: %w", err)
+	}
+
+	c.logger.Debug("Alert search completed",
+		"total_hits", response.Hits.Total.Value,
+		"returned_hits", len(response.Hits.Hits))
+
+	return response, nil
+}

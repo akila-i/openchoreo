@@ -132,6 +132,9 @@ func main() {
 	api.HandleFunc("POST /api/metrics/component/http", handler.GetComponentHTTPMetrics)
 	api.HandleFunc("POST /api/metrics/component/usage", handler.GetComponentResourceMetrics)
 
+	// API routes - Alerting
+	api.HandleFunc("POST /api/alerting/history/component", handler.GetComponentAlertingHistory)
+
 	// MCP endpoint with chained middleware (logger -> recovery -> auth401 -> jwt -> handler)
 	mcpMiddleware := initMCPMiddleware(logger)
 	mcpRoutes := routes.Group(mcpMiddleware, jwtAuth)

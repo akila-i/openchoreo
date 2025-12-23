@@ -203,6 +203,17 @@ type RCAReportDetailed struct {
 	// Additional arbitrary fields will be included via custom marshaling if needed
 }
 
+// AlertingHistoryRequest represents the request body for POST /api/alerting/history/component
+type AlertingHistoryRequest struct {
+	ComponentID   string `json:"componentId" validate:"required"`
+	StartTime     string `json:"startTime" validate:"required"`
+	EndTime       string `json:"endTime" validate:"required"`
+	EnvironmentID string `json:"environmentId" validate:"required"`
+	Limit         int    `json:"limit,omitempty"`
+	SortOrder     string `json:"sortOrder,omitempty"`
+	ProjectID     string `json:"projectId," validate:"required"`
+}
+
 // ErrorResponse represents an error response
 type ErrorResponse struct {
 	Error   string `json:"error"`
@@ -631,6 +642,70 @@ func (h *Handler) GetComponentResourceMetrics(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		h.logger.Error("Failed to get component resource metrics", "error", err)
 		h.writeErrorResponse(w, http.StatusInternalServerError, ErrorTypeInternalError, ErrorCodeInternalError, ErrorMsgFailedToRetrieveMetrics)
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, result)
+}
+
+// GetComponentAlertingHistory handles POST /api/alerting/history/component
+func (h *Handler) GetComponentAlertingHistory(w http.ResponseWriter, r *http.Request) {
+	var req AlertingHistoryRequest
+	if err := httputil.BindJSON(r, &req); err != nil {
+		h.logger.Error("Failed to bind request", "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrorTypeInvalidRequest, ErrorCodeInvalidRequest, ErrorMsgInvalidRequestFormat)
+		return
+	}
+
+	var startTime, endTime time.Time
+	var err error
+
+	err = validateTimes(req.StartTime, req.EndTime)
+	if err != nil {
+		h.logger.Debug("Invalid/missing request parameters", "requestBody", req, "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrorTypeInvalidRequest, ErrorCodeInvalidRequest, err.Error())
+		return
+	}
+
+	startTime, err = time.Parse(time.RFC3339, req.StartTime)
+	if err != nil {
+		h.logger.Error("Failed to parse start time", "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrorTypeInvalidRequest, ErrorCodeInvalidRequest, ErrorMsgInvalidTimeFormat)
+		return
+	}
+
+	endTime, err = time.Parse(time.RFC3339, req.EndTime)
+	if err != nil {
+		h.logger.Error("Failed to parse end time", "error", err)
+		h.writeErrorResponse(w, http.StatusBadRequest, ErrorTypeInvalidRequest, ErrorCodeInvalidRequest, ErrorMsgInvalidTimeFormat)
+		return
+	}
+
+	// Set defaults
+	if req.Limit == 0 {
+		req.Limit = 100
+	}
+	if req.SortOrder == "" {
+		req.SortOrder = defaultSortOrder
+	}
+
+	// Build query parameters
+	params := service.AlertHistoryQueryParams{
+		ComponentID:   req.ComponentID,
+		EnvironmentID: req.EnvironmentID,
+		ProjectID:     req.ProjectID,
+		StartTime:     startTime.Format(time.RFC3339),
+		EndTime:       endTime.Format(time.RFC3339),
+		Limit:         req.Limit,
+		SortOrder:     req.SortOrder,
+	}
+
+	// Execute query
+	ctx := r.Context()
+	result, err := h.service.GetComponentAlertingHistory(ctx, params)
+	if err != nil {
+		h.logger.Error("Failed to get component alerting history", "error", err)
+		h.writeErrorResponse(w, http.StatusInternalServerError, ErrorTypeInternalError, ErrorCodeInternalError, "Failed to retrieve alerting history")
 		return
 	}
 

@@ -96,6 +96,13 @@ func (m *MockOpenSearchClient) WriteAlertEntry(ctx context.Context, entry map[st
 	return m.alertEntryID, nil
 }
 
+func (m *MockOpenSearchClient) SearchAlerts(ctx context.Context, query map[string]interface{}) (*opensearch.SearchResponse, error) {
+	if m.searchError != nil {
+		return nil, m.searchError
+	}
+	return m.searchResponse, nil
+}
+
 func newMockLoggingService() *LoggingService {
 	cfg := &config.Config{
 		OpenSearch: config.OpenSearchConfig{

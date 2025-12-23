@@ -793,6 +793,52 @@ func buildWebhookMessageTemplate(params types.AlertingRuleRequest) string {
 	)
 }
 
+// BuildAlertHistoryQuery builds a query for retrieving alert history for a component
+func (qb *QueryBuilder) BuildAlertHistoryQuery(componentID, environmentID, startTime, endTime string, limit int, sortOrder string) map[string]interface{} {
+	mustConditions := []map[string]interface{}{}
+
+	// Add component ID filter
+	if componentID != "" {
+		componentFilter := map[string]interface{}{
+			"term": map[string]interface{}{
+				"labels." + labels.ComponentID + ".keyword": componentID,
+			},
+		}
+		mustConditions = append(mustConditions, componentFilter)
+	}
+
+	// Add environment ID filter
+	if environmentID != "" {
+		envFilter := map[string]interface{}{
+			"term": map[string]interface{}{
+				"labels." + labels.EnvironmentID + ".keyword": environmentID,
+			},
+		}
+		mustConditions = append(mustConditions, envFilter)
+	}
+
+	// Add time range filter
+	mustConditions = addTimeRangeFilter(mustConditions, startTime, endTime)
+
+	query := map[string]interface{}{
+		"size": limit,
+		"query": map[string]interface{}{
+			"bool": map[string]interface{}{
+				"must": mustConditions,
+			},
+		},
+		"sort": []map[string]interface{}{
+			{
+				"@timestamp": map[string]interface{}{
+					"order": sortOrder,
+				},
+			},
+		},
+	}
+
+	return query
+}
+
 // BuildRCAReportsQuery builds a query for RCA reports by project with optional filtering
 func (qb *QueryBuilder) BuildRCAReportsQuery(params RCAReportQueryParams) map[string]interface{} {
 	mustConditions := []map[string]interface{}{

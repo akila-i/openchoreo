@@ -42,6 +42,7 @@ type OpenSearchClient interface {
 	UpdateMonitor(ctx context.Context, monitorID string, monitor map[string]interface{}) (lastUpdateTime int64, err error)
 	DeleteMonitor(ctx context.Context, monitorID string) error
 	WriteAlertEntry(ctx context.Context, entry map[string]interface{}) (string, error)
+	SearchAlerts(ctx context.Context, query map[string]interface{}) (*opensearch.SearchResponse, error)
 	HealthCheck(ctx context.Context) error
 }
 
@@ -60,6 +61,37 @@ type LogResponse struct {
 	Logs       []opensearch.LogEntry `json:"logs"`
 	TotalCount int                   `json:"totalCount"`
 	Took       int                   `json:"tookMs"`
+}
+
+// AlertHistoryQueryParams contains parameters for querying alert history
+type AlertHistoryQueryParams struct {
+	ComponentID   string
+	ProjectID     string
+	EnvironmentID string
+	StartTime     string
+	EndTime       string
+	Limit         int
+	SortOrder     string
+}
+
+// AlertEntry represents a single alert entry in the history
+type AlertEntry struct {
+	ID            string                 `json:"id"`
+	Timestamp     string                 `json:"timestamp"`
+	AlertRuleName string                 `json:"alertRuleName"`
+	AlertValue    interface{}            `json:"alertValue"`
+	ComponentID   string                 `json:"componentId"`
+	EnvironmentID string                 `json:"environmentId"`
+	ProjectID     string                 `json:"projectId"`
+	EnableAIRCA   bool                   `json:"enableAiRca"`
+	Labels        map[string]interface{} `json:"labels,omitempty"`
+}
+
+// AlertHistoryResponse represents the response for alert history queries
+type AlertHistoryResponse struct {
+	Alerts     []AlertEntry `json:"alerts"`
+	TotalCount int          `json:"totalCount"`
+	Took       int          `json:"tookMs"`
 }
 
 // HTTPMetricsTimeSeries represents HTTP metrics as time series data. This is what will be returned by the
@@ -1205,4 +1237,89 @@ func (s *LoggingService) StoreAlertEntry(ctx context.Context, requestBody map[st
 	}
 
 	return alertID, nil
+}
+
+// GetComponentAlertingHistory retrieves the alerting history for a specific component
+func (s *LoggingService) GetComponentAlertingHistory(ctx context.Context, params AlertHistoryQueryParams) (*AlertHistoryResponse, error) {
+	s.logger.Info("Getting component alerting history",
+		"component_id", params.ComponentID,
+		"environment_id", params.EnvironmentID,
+		"start_time", params.StartTime,
+		"end_time", params.EndTime)
+
+	// Build the query for searching alerts
+	query := s.queryBuilder.BuildAlertHistoryQuery(params.ComponentID, params.EnvironmentID, params.StartTime, params.EndTime, params.Limit, params.SortOrder)
+
+	// Execute search on the alerts index
+	response, err := s.osClient.SearchAlerts(ctx, query)
+	if err != nil {
+		s.logger.Error("Failed to search alerts", "error", err)
+		return nil, fmt.Errorf("failed to search alerts: %w", err)
+	}
+
+	// Parse alert entries
+	alerts := make([]AlertEntry, 0, len(response.Hits.Hits))
+	for _, hit := range response.Hits.Hits {
+		entry := parseAlertEntry(hit)
+		alerts = append(alerts, entry)
+	}
+
+	s.logger.Info("Component alerting history retrieved",
+		"count", len(alerts),
+		"total", response.Hits.Total.Value)
+
+	return &AlertHistoryResponse{
+		Alerts:     alerts,
+		TotalCount: response.Hits.Total.Value,
+		Took:       response.Took,
+	}, nil
+}
+
+// parseAlertEntry parses an OpenSearch hit into an AlertEntry
+func parseAlertEntry(hit opensearch.Hit) AlertEntry {
+	source := hit.Source
+
+	entry := AlertEntry{
+		ID: hit.ID,
+	}
+
+	// Extract timestamp
+	if ts, ok := source["@timestamp"].(string); ok {
+		entry.Timestamp = ts
+	}
+
+	// Extract alert rule name
+	if name, ok := source["alert_rule_name"].(string); ok {
+		entry.AlertRuleName = name
+	}
+
+	// Extract alert value
+	entry.AlertValue = source["alert_value"]
+
+	// Extract enable AI RCA
+	if aiRCA, ok := source["enable_ai_rca"].(bool); ok {
+		entry.EnableAIRCA = aiRCA
+	}
+
+	// Extract labels
+	if labelsRaw, ok := source["labels"].(map[string]interface{}); ok {
+		entry.Labels = labelsRaw
+
+		// Extract component ID from labels
+		if compID, ok := labelsRaw[observerlabels.ComponentID].(string); ok {
+			entry.ComponentID = compID
+		}
+
+		// Extract environment ID from labels
+		if envID, ok := labelsRaw[observerlabels.EnvironmentID].(string); ok {
+			entry.EnvironmentID = envID
+		}
+
+		// Extract project ID from labels
+		if projID, ok := labelsRaw[observerlabels.ProjectID].(string); ok {
+			entry.ProjectID = projID
+		}
+	}
+
+	return entry
 }
