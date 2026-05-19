@@ -32,6 +32,17 @@ type Connection interface {
 	Close() error
 }
 
+// streamSession is the common contract for any long-lived streaming session
+// hosted on the cluster-agent (e.g. exec, hubble flows). All session impls
+// must be safe to close() multiple times concurrently.
+type streamSession interface {
+	// handleChunk processes a non-close chunk from the gateway side
+	// (typically client-to-server data; one-direction streams may ignore it).
+	handleChunk(chunk *messaging.HTTPTunnelStreamChunk)
+	// close terminates the session and releases its resources.
+	close()
+}
+
 type Agent struct {
 	config     *Config
 	clientCert tls.Certificate
@@ -43,8 +54,8 @@ type Agent struct {
 	mu         sync.Mutex
 	logger     *slog.Logger
 	stopChan   chan struct{}
-	// activeStreams tracks active exec streaming sessions indexed by requestID
-	activeStreams   map[string]*execSession
+	// activeStreams tracks active streaming sessions (exec, hubble, ...) indexed by requestID
+	activeStreams   map[string]streamSession
 	activeStreamsMu sync.Mutex
 }
 
@@ -98,7 +109,7 @@ func New(cfg *Config, k8sClient client.Client, k8sConfig *rest.Config, logger *s
 		router:        router,
 		logger:        logger.With("component", "agent", "planeID", cfg.PlaneID),
 		stopChan:      make(chan struct{}),
-		activeStreams: make(map[string]*execSession),
+		activeStreams: make(map[string]streamSession),
 	}, nil
 }
 
@@ -265,6 +276,44 @@ func (a *Agent) handleConnection(ctx context.Context) {
 
 		go a.handleHTTPTunnelRequest(&httpReq)
 	}
+}
+
+// handleHTTPTunnelStreamInit dispatches an incoming stream init to the handler
+// for its target (e.g. "k8s" for pod exec, "hubble" for Cilium flow streams).
+func (a *Agent) handleHTTPTunnelStreamInit(init *messaging.HTTPTunnelStreamInit) {
+	switch init.Target {
+	case "k8s":
+		a.handleK8sExecStreamInit(init)
+	case "hubble":
+		a.handleHubbleStreamInit(init)
+	default:
+		a.logger.Warn("unknown stream init target",
+			"requestID", init.RequestID,
+			"target", init.Target,
+		)
+		a.sendStreamClose(init.RequestID, fmt.Sprintf("unknown stream target: %s", init.Target))
+	}
+}
+
+// routeStreamChunk dispatches a stream chunk to its active session.
+// On IsClose it terminates the session; otherwise it delegates to the
+// session's per-target chunk handler.
+func (a *Agent) routeStreamChunk(chunk *messaging.HTTPTunnelStreamChunk) {
+	a.activeStreamsMu.Lock()
+	session, ok := a.activeStreams[chunk.RequestID]
+	a.activeStreamsMu.Unlock()
+
+	if !ok {
+		a.logger.Warn("Received stream chunk for unknown session", "requestID", chunk.RequestID)
+		return
+	}
+
+	if chunk.IsClose {
+		session.close()
+		return
+	}
+
+	session.handleChunk(chunk)
 }
 
 // handleHTTPTunnelRequest handles HTTPTunnelRequest

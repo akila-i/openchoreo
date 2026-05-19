@@ -164,8 +164,9 @@ func (q *termSizeQueue) Next() *remotecommand.TerminalSize {
 	}
 }
 
-// handleHTTPTunnelStreamInit handles a new exec stream request.
-func (a *Agent) handleHTTPTunnelStreamInit(init *messaging.HTTPTunnelStreamInit) {
+// handleK8sExecStreamInit handles a new pod-exec stream request from the
+// gateway (the "k8s" target). Dispatched from Agent.handleHTTPTunnelStreamInit.
+func (a *Agent) handleK8sExecStreamInit(init *messaging.HTTPTunnelStreamInit) {
 	logger := a.logger.With("requestID", init.RequestID, "path", init.Path)
 	logger.Info("Received exec stream init")
 
@@ -259,33 +260,21 @@ func (a *Agent) handleHTTPTunnelStreamInit(init *messaging.HTTPTunnelStreamInit)
 	a.sendStreamClose(init.RequestID, "")
 }
 
-// routeStreamChunk routes an incoming stream chunk to the correct exec session.
-func (a *Agent) routeStreamChunk(chunk *messaging.HTTPTunnelStreamChunk) {
-	a.activeStreamsMu.Lock()
-	session, ok := a.activeStreams[chunk.RequestID]
-	a.activeStreamsMu.Unlock()
-
-	if !ok {
-		a.logger.Warn("Received stream chunk for unknown session", "requestID", chunk.RequestID)
-		return
-	}
-
-	if chunk.IsClose {
-		session.close()
-		return
-	}
-
+// handleChunk delivers an inbound stream chunk to this exec session.
+// Stdin payloads are written to the SPDY stdin pipe; resize payloads are
+// pushed onto the terminal-size queue. Other stream types are ignored.
+// Close handling lives in Agent.routeStreamChunk.
+func (s *execSession) handleChunk(chunk *messaging.HTTPTunnelStreamChunk) {
 	if len(chunk.Data) < 1 {
 		return
 	}
-
 	// Data is framed: first byte = stream type, rest = payload
 	switch chunk.Data[0] {
 	case execStreamStdin:
 		if len(chunk.Data) > 1 {
-			session.stdinPipe.Write(chunk.Data[1:])
+			s.stdinPipe.Write(chunk.Data[1:])
 		} else {
-			session.stdinPipe.Close()
+			s.stdinPipe.Close()
 		}
 	case execStreamResize:
 		if len(chunk.Data) > 1 {
@@ -295,7 +284,7 @@ func (a *Agent) routeStreamChunk(chunk *messaging.HTTPTunnelStreamChunk) {
 			}
 			if err := json.Unmarshal(chunk.Data[1:], &size); err == nil {
 				select {
-				case session.resizeCh <- remotecommand.TerminalSize{Width: size.Width, Height: size.Height}:
+				case s.resizeCh <- remotecommand.TerminalSize{Width: size.Width, Height: size.Height}:
 				default:
 				}
 			}

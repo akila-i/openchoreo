@@ -17,4 +17,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	RequestTimeout    time.Duration
 	Routes            []RouteConfig // Backend service routes for HTTP proxy
+	// HubbleRelayAddr is the gRPC endpoint of Cilium Hubble's relay service in the
+	// data plane (e.g. "hubble-relay.kube-system.svc.cluster.local:4245"). Empty
+	// means use the in-cluster default.
+	HubbleRelayAddr string
 }

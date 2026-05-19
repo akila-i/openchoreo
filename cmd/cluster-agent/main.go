@@ -36,6 +36,7 @@ func main() {
 		heartbeatInterval time.Duration
 		requestTimeout    time.Duration
 		logLevel          string
+		hubbleRelayAddr   string
 	)
 
 	var kubeconfig string
@@ -64,6 +65,9 @@ func main() {
 	flag.DurationVar(&heartbeatInterval, "heartbeat-interval", defaultHeartbeatInterval, "Heartbeat message interval")
 	flag.DurationVar(&requestTimeout, "request-timeout", defaultRequestTimeout, "Request timeout duration")
 	flag.StringVar(&logLevel, "log-level", cmdutil.GetEnv("LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
+	flag.StringVar(&hubbleRelayAddr, "hubble-relay-addr",
+		cmdutil.GetEnv("HUBBLE_RELAY_ADDR", ""),
+		"gRPC address of Cilium Hubble relay in this data plane (empty = use in-cluster default)")
 	flag.Parse()
 
 	if planeType == "" {
@@ -119,6 +123,7 @@ func main() {
 		HeartbeatInterval: heartbeatInterval,
 		RequestTimeout:    requestTimeout,
 		Routes:            []agentclient.RouteConfig{}, // Empty for now, can be loaded from config file later
+		HubbleRelayAddr:   hubbleRelayAddr,
 	}
 
 	agent, err := agentclient.New(config, k8sClient, k8sConfig, logger)

@@ -216,7 +216,7 @@ func (h *ExecHandler) resolvePod(ctx context.Context, namespace, componentName, 
 		if project == "" {
 			return nil, fmt.Errorf("--project or --env is required")
 		}
-		resolvedEnv, err := h.resolveLowestEnvironment(ctx, namespace, project)
+		resolvedEnv, err := resolveLowestEnvironment(ctx, h.k8sClient, namespace, project)
 		if err != nil {
 			return nil, err
 		}
@@ -354,9 +354,10 @@ func (h *ExecHandler) findReadyPod(ctx context.Context, plane execPlaneInfo, nam
 }
 
 // resolveLowestEnvironment finds the root environment from the project's deployment pipeline.
-func (h *ExecHandler) resolveLowestEnvironment(ctx context.Context, namespace, projectName string) (string, error) {
+// Shared between exec and wirelogs handlers (and any future per-component data-plane endpoint).
+func resolveLowestEnvironment(ctx context.Context, k8sClient client.Client, namespace, projectName string) (string, error) {
 	proj := &openchoreov1alpha1.Project{}
-	if err := h.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: projectName}, proj); err != nil {
+	if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: projectName}, proj); err != nil {
 		return "", fmt.Errorf("project %q not found: %w", projectName, err)
 	}
 
@@ -365,7 +366,7 @@ func (h *ExecHandler) resolveLowestEnvironment(ctx context.Context, namespace, p
 	}
 
 	pipeline := &openchoreov1alpha1.DeploymentPipeline{}
-	if err := h.k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: proj.Spec.DeploymentPipelineRef.Name}, pipeline); err != nil {
+	if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: proj.Spec.DeploymentPipelineRef.Name}, pipeline); err != nil {
 		return "", fmt.Errorf("deployment pipeline not found: %w", err)
 	}
 

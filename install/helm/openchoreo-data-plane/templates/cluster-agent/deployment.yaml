@@ -62,6 +62,11 @@ spec:
         - --heartbeat-interval={{ .Values.clusterAgent.heartbeatInterval }}
         - --reconnect-delay={{ .Values.clusterAgent.reconnectDelay }}
         - --log-level={{ .Values.clusterAgent.logLevel }}
+        {{- with .Values.clusterAgent.hubble }}
+        {{- if .relayAddr }}
+        - --hubble-relay-addr={{ .relayAddr }}
+        {{- end }}
+        {{- end }}
         env:
         - name: POD_NAME
           valueFrom:

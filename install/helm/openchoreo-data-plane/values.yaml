@@ -403,6 +403,21 @@ clusterAgent:
 
   # @schema
   # type: object
+  # description: |
+  #   Cilium Hubble integration for the wirelogs stream endpoint. Leave relayAddr
+  #   empty to use the in-cluster default (hubble-relay.kube-system.svc.cluster.local:4245).
+  #   Only the cluster-agent in the data plane reads this; control-plane charts ignore it.
+  # @schema
+  hubble:
+    # @schema
+    # type: string
+    # description: gRPC address of the Hubble relay service in this data plane (host:port). Empty = in-cluster default.
+    # default: ""
+    # @schema
+    relayAddr: ""
+
+  # @schema
+  # type: object
   # description: Resource limits and requests for cluster agent
   # @schema
   resources:
