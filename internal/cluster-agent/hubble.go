@@ -35,7 +35,7 @@ const defaultHubbleRelayAddr = "hubble-relay.kube-system.svc.cluster.local:4245"
 // comma-separated string per filter to ensure they must ALL match.
 func buildHubbleFlowFilters(component, project, environment, controlPlaneNamespace string) []*flow.FlowFilter {
 	selector := fmt.Sprintf(
-		"openchoreo.dev/component=%s,openchoreo.dev/project=%s,openchoreo.dev/environment=%s,openchoreo.dev/namespace=%s",
+		"k8s:openchoreo.dev/component=%s,k8s:openchoreo.dev/project=%s,k8s:openchoreo.dev/environment=%s,k8s:openchoreo.dev/namespace=%s",
 		component, project, environment, controlPlaneNamespace,
 	)
 	return []*flow.FlowFilter{
