@@ -3686,6 +3686,29 @@ gateway:
     # @schema
     certificateRefs: []
 
+  # @schema
+  # type: object
+  # description: |
+  #   WebSocket upgrade support on the default Gateway. Required by openchoreo-api
+  #   endpoints that upgrade HTTP/1.1 connections to WebSocket (occ component exec,
+  #   wirelogs Hubble flow streaming). Disable only if the data-plane gateway in
+  #   use does not need an HTTPListenerPolicy to allow WebSocket upgrades.
+  # @schema
+  websocketUpgrade:
+    # @schema
+    # type: boolean
+    # description: When true, install an HTTPListenerPolicy that enables websocket upgrades on gateway-default.
+    # default: true
+    # @schema
+    enabled: true
+
+    # @schema
+    # type: string
+    # description: Name of the generated HTTPListenerPolicy resource.
+    # default: enable-websocket
+    # @schema
+    name: enable-websocket
+
 # @schema
 # type: object
 # description: Event-forwarder configuration — watches OpenChoreo Kubernetes resources via informers and forwards change-notification webhooks to subscribers (typically Backstage's events plugin) for near-real-time catalog updates.

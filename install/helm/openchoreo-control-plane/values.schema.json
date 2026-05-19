@@ -2619,6 +2619,27 @@
           "required": [],
           "title": "tls",
           "type": "object"
+        },
+        "websocketUpgrade": {
+          "additionalProperties": false,
+          "description": "WebSocket upgrade support on the default Gateway. Required by openchoreo-api\nendpoints that upgrade HTTP/1.1 connections to WebSocket (occ component exec,\nwirelogs Hubble flow streaming). Disable only if the data-plane gateway in\nuse does not need an HTTPListenerPolicy to allow WebSocket upgrades.",
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "When true, install an HTTPListenerPolicy that enables websocket upgrades on gateway-default.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "name": {
+              "default": "enable-websocket",
+              "description": "Name of the generated HTTPListenerPolicy resource.",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "websocketUpgrade",
+          "type": "object"
         }
       },
       "required": [],

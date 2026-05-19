@@ -1,0 +1,24 @@
+{{- if and .Values.gateway.enabled .Values.gateway.websocketUpgrade.enabled }}
+# kgateway HTTPListenerPolicy that enables WebSocket upgrade on the default
+# Gateway. Required by openchoreo-api endpoints that upgrade to WebSocket:
+#   - /exec/...     (occ component exec)
+#   - /wirelogs/... (Cilium Hubble flow stream)
+# Without this, kgateway would 400/500 the upgrade request before it reaches
+# the openchoreo-api handlers.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: HTTPListenerPolicy
+metadata:
+  name: {{ .Values.gateway.websocketUpgrade.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "openchoreo-control-plane.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gateway-default
+  upgradeConfig:
+    enabledUpgrades:
+      - websocket
+{{- end }}
