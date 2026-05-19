@@ -52,21 +52,16 @@ var wirelogsUpgrader = websocket.Upgrader{
 }
 
 // ServeHTTP handles the wirelogs WebSocket upgrade and streams Hubble flow events.
-// URL: /wirelogs/namespaces/{namespace}/components/{component}?environment=...&project=...
+// URL: /wirelogs/namespaces/{namespace}/projects/{project}/components/{component}?environment=...
 func (h *WirelogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse URL path: /wirelogs/namespaces/{namespace}/components/{component}
-	path := strings.TrimPrefix(r.URL.Path, "/wirelogs/namespaces/")
-	parts := strings.SplitN(path, "/components/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		http.Error(w, "invalid wirelogs URL: expected /wirelogs/namespaces/{ns}/components/{name}", http.StatusBadRequest)
+	// Parse URL path: /wirelogs/namespaces/{namespace}/projects/{project}/components/{component}
+	namespace, project, componentName, ok := parseWirelogsPath(r.URL.Path)
+	if !ok {
+		http.Error(w, "invalid wirelogs URL: expected /wirelogs/namespaces/{ns}/projects/{proj}/components/{name}", http.StatusBadRequest)
 		return
 	}
-	namespace := parts[0]
-	componentName := parts[1]
 
-	query := r.URL.Query()
-	project := query.Get("project")
-	envName := query.Get("environment")
+	envName := r.URL.Query().Get("environment")
 
 	ctx := r.Context()
 	logger := h.logger.With("namespace", namespace, "component", componentName)
@@ -114,7 +109,7 @@ func (h *WirelogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	gwURL, err := h.buildGatewayWirelogsURL(plane, componentName, envName, namespace)
+	gwURL, err := h.buildGatewayWirelogsURL(plane, componentName, project, envName, namespace)
 	if err != nil {
 		logger.Error("Failed to build gateway wirelogs URL", "error", err)
 		writeWSError(clientConn, fmt.Sprintf("internal error: %v", err))
@@ -214,7 +209,7 @@ func (h *WirelogsHandler) resolvePlane(ctx context.Context, namespace, component
 }
 
 // buildGatewayWirelogsURL constructs the WebSocket URL for the gateway wirelogs endpoint.
-func (h *WirelogsHandler) buildGatewayWirelogsURL(plane execPlaneInfo, component, environment, namespace string) (string, error) {
+func (h *WirelogsHandler) buildGatewayWirelogsURL(plane execPlaneInfo, component, project, environment, namespace string) (string, error) {
 	u, err := url.Parse(h.gatewayURL)
 	if err != nil {
 		return "", err
@@ -232,9 +227,26 @@ func (h *WirelogsHandler) buildGatewayWirelogsURL(plane execPlaneInfo, component
 
 	q := u.Query()
 	q.Set("component", component)
+	q.Set("project", project)
 	q.Set("environment", environment)
 	q.Set("namespace", namespace)
 	u.RawQuery = q.Encode()
 
 	return u.String(), nil
+}
+
+// parseWirelogsPath extracts (namespace, project, component) from the request path.
+// Expected form: /wirelogs/namespaces/{ns}/projects/{proj}/components/{comp}
+func parseWirelogsPath(p string) (namespace, project, component string, ok bool) {
+	parts := strings.Split(strings.Trim(p, "/"), "/")
+	if len(parts) != 7 {
+		return "", "", "", false
+	}
+	if parts[0] != "wirelogs" || parts[1] != "namespaces" || parts[3] != "projects" || parts[5] != "components" {
+		return "", "", "", false
+	}
+	if parts[2] == "" || parts[4] == "" || parts[6] == "" {
+		return "", "", "", false
+	}
+	return parts[2], parts[4], parts[6], true
 }

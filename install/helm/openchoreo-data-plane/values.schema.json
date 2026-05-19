@@ -20,6 +20,21 @@
           "title": "heartbeatInterval",
           "type": "string"
         },
+        "hubble": {
+          "additionalProperties": false,
+          "description": "Cilium Hubble integration for the wirelogs stream endpoint. Leave relayAddr\nempty to use the in-cluster default (hubble-relay.kube-system.svc.cluster.local:4245).\nOnly the cluster-agent in the data plane reads this; control-plane charts ignore it.",
+          "properties": {
+            "relayAddr": {
+              "default": "",
+              "description": "gRPC address of the Hubble relay service in this data plane (host:port). Empty = in-cluster default.",
+              "title": "relayAddr",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "hubble",
+          "type": "object"
+        },
         "image": {
           "additionalProperties": false,
           "description": "Container image configuration for cluster agent",

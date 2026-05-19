@@ -41,9 +41,11 @@ func TestWirelogsHandler_RejectsMalformedPath(t *testing.T) {
 		path string
 	}{
 		{"missing namespaces segment", "/wirelogs/checkout"},
-		{"missing components segment", "/wirelogs/namespaces/ns-a"},
-		{"empty namespace", "/wirelogs/namespaces//components/checkout"},
-		{"empty component", "/wirelogs/namespaces/ns-a/components/"},
+		{"missing projects segment", "/wirelogs/namespaces/ns-a/components/checkout"},
+		{"missing components segment", "/wirelogs/namespaces/ns-a/projects/demo"},
+		{"empty namespace", "/wirelogs/namespaces//projects/demo/components/checkout"},
+		{"empty project", "/wirelogs/namespaces/ns-a/projects//components/checkout"},
+		{"empty component", "/wirelogs/namespaces/ns-a/projects/demo/components/"},
 	}
 
 	for _, tt := range tests {
@@ -68,7 +70,7 @@ func TestWirelogsHandler_AuthzNotConfigured(t *testing.T) {
 	h := &WirelogsHandler{logger: slog.Default()} // authzChecker == nil
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, wirelogsRequest(t, "/wirelogs/namespaces/ns-a/components/checkout?environment=development"))
+	h.ServeHTTP(rec, wirelogsRequest(t, "/wirelogs/namespaces/ns-a/projects/demo/components/checkout?environment=development"))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Contains(t, rec.Body.String(), "authorization not configured")
@@ -85,7 +87,7 @@ func TestWirelogsHandler_Forbidden(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, wirelogsRequest(t, "/wirelogs/namespaces/ns-a/components/checkout?environment=development"))
+	h.ServeHTTP(rec, wirelogsRequest(t, "/wirelogs/namespaces/ns-a/projects/demo/components/checkout?environment=development"))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
@@ -110,7 +112,7 @@ func TestWirelogsHandler_PassesActionViewLogs(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, wirelogsRequest(t, "/wirelogs/namespaces/ns-a/components/checkout?environment=development&project=demo"))
+	h.ServeHTTP(rec, wirelogsRequest(t, "/wirelogs/namespaces/ns-a/projects/demo/components/checkout?environment=development"))
 
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	require.NotNil(t, captured)
@@ -118,7 +120,7 @@ func TestWirelogsHandler_PassesActionViewLogs(t *testing.T) {
 	assert.Equal(t, "component", captured.Resource.Type)
 	assert.Equal(t, "checkout", captured.Resource.ID)
 	assert.Equal(t, "ns-a", captured.Resource.Hierarchy.Namespace)
-	assert.Equal(t, "demo", captured.Resource.Hierarchy.Project)
+	assert.Equal(t, "demo", captured.Resource.Hierarchy.Project, "project must come from the URL path")
 }
 
 func TestBuildGatewayWirelogsURL(t *testing.T) {
@@ -129,11 +131,12 @@ func TestBuildGatewayWirelogsURL(t *testing.T) {
 		planeID:     "prod-cluster",
 		crNamespace: "team-a",
 		crName:      "prod-dp",
-	}, "checkout", "development", "ns-a")
+	}, "checkout", "shopfront", "development", "ns-a")
 	require.NoError(t, err)
 
 	assert.Contains(t, got, "wss://gw.example.com:8443/api/wirelogs/dataplane/prod-cluster/team-a/prod-dp")
 	assert.Contains(t, got, "component=checkout")
+	assert.Contains(t, got, "project=shopfront")
 	assert.Contains(t, got, "environment=development")
 	assert.Contains(t, got, "namespace=ns-a")
 }

@@ -44,10 +44,11 @@ func (s *Server) handleWirelogs(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query()
 	component := query.Get("component")
+	project := query.Get("project")
 	environment := query.Get("environment")
 	namespace := query.Get("namespace")
-	if component == "" || environment == "" || namespace == "" {
-		http.Error(w, "component, environment, and namespace query parameters are required", http.StatusBadRequest)
+	if component == "" || project == "" || environment == "" || namespace == "" {
+		http.Error(w, "component, project, environment, and namespace query parameters are required", http.StatusBadRequest)
 		return
 	}
 
@@ -61,6 +62,7 @@ func (s *Server) handleWirelogs(w http.ResponseWriter, r *http.Request) {
 		"plane", planeIdentifier,
 		"cr", crKey,
 		"component", component,
+		"project", project,
 		"environment", environment,
 	)
 
@@ -89,6 +91,7 @@ func (s *Server) handleWirelogs(w http.ResponseWriter, r *http.Request) {
 
 	agentQuery := url.Values{}
 	agentQuery.Set("component", component)
+	agentQuery.Set("project", project)
 	agentQuery.Set("environment", environment)
 	agentQuery.Set("namespace", namespace)
 

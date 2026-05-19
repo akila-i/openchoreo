@@ -27,23 +27,28 @@ const defaultHubbleRelayAddr = "hubble-relay.kube-system.svc.cluster.local:4245"
 // buildHubbleFlowFilters returns the OR'd whitelist of FlowFilters used to follow
 // Hubble flows for an OpenChoreo component. The list contains two filters so flows
 // match when the component's pods are EITHER source OR destination.
-func buildHubbleFlowFilters(component, environment, controlPlaneNamespace string) []*flow.FlowFilter {
-	labels := []string{
-		fmt.Sprintf("openchoreo.dev/component=%s", component),
-		fmt.Sprintf("openchoreo.dev/environment=%s", environment),
-		fmt.Sprintf("openchoreo.dev/namespace=%s", controlPlaneNamespace),
-	}
+//
+// Each entry in FlowFilter.SourceLabel / DestinationLabel is treated as an
+// independent label selector that is OR'd across the list; within a single
+// selector, comma-separated k8s-style terms are AND'd (k8s.io/labels.Parse
+// semantics). So all the component-identifying labels are joined into ONE
+// comma-separated string per filter to ensure they must ALL match.
+func buildHubbleFlowFilters(component, project, environment, controlPlaneNamespace string) []*flow.FlowFilter {
+	selector := fmt.Sprintf(
+		"openchoreo.dev/component=%s,openchoreo.dev/project=%s,openchoreo.dev/environment=%s,openchoreo.dev/namespace=%s",
+		component, project, environment, controlPlaneNamespace,
+	)
 	return []*flow.FlowFilter{
-		{SourceLabel: labels},
-		{DestinationLabel: labels},
+		{SourceLabel: []string{selector}},
+		{DestinationLabel: []string{selector}},
 	}
 }
 
 // newGetFlowsRequest assembles the live-tail flow request for a component.
-func newGetFlowsRequest(component, environment, controlPlaneNamespace string) *observer.GetFlowsRequest {
+func newGetFlowsRequest(component, project, environment, controlPlaneNamespace string) *observer.GetFlowsRequest {
 	return &observer.GetFlowsRequest{
 		Follow:    true,
-		Whitelist: buildHubbleFlowFilters(component, environment, controlPlaneNamespace),
+		Whitelist: buildHubbleFlowFilters(component, project, environment, controlPlaneNamespace),
 	}
 }
 
@@ -91,10 +96,11 @@ func (a *Agent) handleHubbleStreamInit(init *messaging.HTTPTunnelStreamInit) {
 		return
 	}
 	component := params.Get("component")
+	project := params.Get("project")
 	environment := params.Get("environment")
 	namespace := params.Get("namespace")
-	if component == "" || environment == "" || namespace == "" {
-		a.sendStreamClose(init.RequestID, "component, environment, namespace query params are required")
+	if component == "" || project == "" || environment == "" || namespace == "" {
+		a.sendStreamClose(init.RequestID, "component, project, environment, namespace query params are required")
 		return
 	}
 
@@ -117,7 +123,7 @@ func (a *Agent) handleHubbleStreamInit(init *messaging.HTTPTunnelStreamInit) {
 	}()
 
 	relayAddr := a.hubbleRelayAddr()
-	logger = logger.With("hubbleRelay", relayAddr, "component", component, "environment", environment)
+	logger = logger.With("hubbleRelay", relayAddr, "component", component, "project", project, "environment", environment)
 
 	conn, err := grpc.NewClient(
 		relayAddr,
@@ -131,7 +137,7 @@ func (a *Agent) handleHubbleStreamInit(init *messaging.HTTPTunnelStreamInit) {
 	defer conn.Close()
 
 	client := observer.NewObserverClient(conn)
-	stream, err := client.GetFlows(ctx, newGetFlowsRequest(component, environment, namespace))
+	stream, err := client.GetFlows(ctx, newGetFlowsRequest(component, project, environment, namespace))
 	if err != nil {
 		logger.Error("GetFlows failed", "error", err)
 		a.sendStreamClose(init.RequestID, fmt.Sprintf("hubble GetFlows failed: %v", err))

@@ -11,31 +11,30 @@ import (
 )
 
 func TestBuildHubbleFlowFilters_ORsSourceAndDestination(t *testing.T) {
-	filters := buildHubbleFlowFilters("checkout", "development", "my-team")
+	filters := buildHubbleFlowFilters("checkout", "shopfront", "development", "my-team")
 
 	// Expect exactly two FlowFilters: one with SourceLabel, one with DestinationLabel,
 	// so flows match when the component pods are EITHER source OR destination.
 	require.Len(t, filters, 2)
 
-	expectedLabels := []string{
-		"openchoreo.dev/component=checkout",
-		"openchoreo.dev/environment=development",
-		"openchoreo.dev/namespace=my-team",
-	}
+	// Each FlowFilter.SourceLabel entry is its own k8s label selector that is
+	// OR'd across the list. To require ALL labels match (AND semantics), the
+	// labels must be joined into a single comma-separated selector string.
+	expected := "openchoreo.dev/component=checkout,openchoreo.dev/project=shopfront,openchoreo.dev/environment=development,openchoreo.dev/namespace=my-team"
 
-	assert.ElementsMatch(t, expectedLabels, filters[0].GetSourceLabel(),
-		"first filter must whitelist by source labels")
+	require.Len(t, filters[0].GetSourceLabel(), 1, "source filter must be a single comma-joined selector (AND), not multiple OR'd entries")
+	assert.Equal(t, expected, filters[0].GetSourceLabel()[0])
 	assert.Empty(t, filters[0].GetDestinationLabel(),
 		"first filter must not constrain destination")
 
-	assert.ElementsMatch(t, expectedLabels, filters[1].GetDestinationLabel(),
-		"second filter must whitelist by destination labels")
+	require.Len(t, filters[1].GetDestinationLabel(), 1, "destination filter must be a single comma-joined selector")
+	assert.Equal(t, expected, filters[1].GetDestinationLabel()[0])
 	assert.Empty(t, filters[1].GetSourceLabel(),
 		"second filter must not constrain source")
 }
 
 func TestNewGetFlowsRequest_LiveTail(t *testing.T) {
-	req := newGetFlowsRequest("checkout", "development", "my-team")
+	req := newGetFlowsRequest("checkout", "shopfront", "development", "my-team")
 
 	assert.True(t, req.GetFollow(), "wirelogs is a live tail; Follow must be true")
 	assert.Zero(t, req.GetNumber(), "v1 does not replay history; Number must be 0")
