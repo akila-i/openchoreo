@@ -23,6 +23,18 @@ Sub-tasks [#4554](https://github.com/openchoreo/openchoreo/issues/4554),
 
 ---
 
+## Progress
+
+| WS | Issue | Status | Commit |
+|---|---|---|---|
+| WS1 — identity labels on plane pods | #4554 | **Done** | `d22d8428f` |
+| WS2 — `platformObservabilityPlaneRef` + CP discoverability | #4559 | Not started | |
+| WS3 — observer + adapter contracts | #4556 / #4557 | Not started | |
+| WS4 — observer implementation + authz | #4556 | Not started | |
+| WS5 — `query_platform_logs` MCP tool | #4560 | Not started | |
+
+---
+
 ## Summary
 
 OpenChoreo's observability plane serves logs for **user workloads** (`dp-*` pods) and **workflow runs**
@@ -168,6 +180,9 @@ written onto a pod. Pods carry physical identity; the observer maps the selected
 
 ### WS1 — Identity labels on platform pods (#4554)
 
+**Status: done** — commit `d22d8428f`. See [As implemented](#ws1-as-implemented) for the
+three things that differed from the plan below.
+
 **Two hazards, both confirmed.** (a) All 13 Deployments render `spec.selector.matchLabels` and
 `spec.template.metadata.labels` from the *same* expression, so anything added via a selector helper
 lands in the immutable selector and makes `helm upgrade` **fail** on existing installs rather than
@@ -234,6 +249,32 @@ template; its selector is system-generated, so it is safe). **DP**: `cluster-age
 
 5. **Upgrade note:** this mutates pod templates, so it triggers one rolling restart of the control plane,
    agents and gateways.
+
+<a id="ws1-as-implemented"></a>
+#### As implemented
+
+Three things the plan did not anticipate:
+
+1. **The Gateway merge needed a variable, not `with`.** Emitting identity labels while preserving
+   values-supplied ones without producing duplicate YAML keys took
+   `merge (dict) ($infra.labels | default dict) (include "<chart>.platformIdentityLabels" . | fromYaml)`,
+   so a values-supplied label wins on conflict. A consequence worth knowing: `spec.infrastructure`
+   is now always emitted on the control-plane and observability-plane Gateways, where it was
+   previously omitted because `.Values.gateway.infrastructure` defaults to `{}`.
+2. **The argo-workflows subchart pods stay unattributed, permanently.** Subchart values cannot
+   template `planeID`, so those pods could only carry `openchoreo.dev/plane` with no id — and that is
+   worse than nothing when two workflow planes share a cluster, because it asserts a plane without
+   saying which instance. They surface as unattributed, which is accurate. Same for pods the
+   community observability modules install into a plane namespace.
+3. **`helm template` on default values fails `validate.yaml`** (placeholder `.invalid` domains,
+   required secret names), so verification runs against `test/e2e/k3d/values-{cp,dp,wp,op}.yaml` plus
+   `--set`s to enable the optional components. The workflow-plane chart also needs
+   `helm repo add argo https://argoproj.github.io/argo-helm` before `helm dependency build`.
+
+**Still open — the one check that needs a cluster.** Whether kgateway copies
+`spec.infrastructure.labels` onto the generated proxy Deployment's *selector* rather than only its pod
+template. `helm template` cannot answer this; if it does reach the selector, gateway upgrades hit the
+same immutability failure this workstream exists to avoid. Verify before the PR merges.
 
 ---
 
@@ -450,19 +491,47 @@ make code.gen && git diff --exit-code    # catches CRD, values.schema.json and o
 
 **Chart labels — the selector-immutability check that matters most**
 
+Default values fail `validate.yaml`, so render against the e2e values files and enable the optional
+components explicitly. The workflow-plane chart needs its argo dependency fetched first
+(`helm repo add argo https://argoproj.github.io/argo-helm && helm dependency build install/helm/openchoreo-workflow-plane`).
+
 ```bash
-for c in control data workflow observability; do
-  helm template test install/helm/openchoreo-$c-plane \
-    | yq 'select(.kind=="Deployment" or .kind=="Job") |
-          {"n": .metadata.name,
-           "pod": .spec.template.metadata.labels | with_entries(select(.key|test("openchoreo.dev/plane"))),
-           "sel": .spec.selector.matchLabels    | with_entries(select(.key|test("openchoreo.dev/plane")))}'
-done
+render() { helm template rel "install/helm/openchoreo-$1-plane" -f "test/e2e/k3d/values-$2.yaml" "${@:3}"; }
+
+{ render control cp --set backstage.enabled=true --set backstage.secretName=bs \
+      --set portalAssistant.enabled=true --set portalAssistant.llm.secretName=pa \
+      --set portalAssistant.llm.modelName=openai:gpt-4o-mini
+  render data dp
+  render workflow wp
+  render observability op --set rca.enabled=true --set finOpsAgent.enabled=true \
+      --set rca.openchoreoApiUrl=http://oc-api.test --set finOpsAgent.openchoreoApiUrl=http://oc-api.test
+} | yq 'select(.kind=="Deployment" or .kind=="Job" or .kind=="Gateway")
+    | [ .kind + "/" + .metadata.name,
+        ((.spec.template.metadata.labels // .spec.infrastructure.labels // {})
+          | with_entries(select(.key|test("^openchoreo.dev/plane"))) | to_entries
+          | map(.key + "=" + .value) | join(" ")),
+        ((.spec.selector.matchLabels // {})
+          | with_entries(select(.key|test("^openchoreo.dev/plane"))) | length | tostring) ]
+    | join("|")'
 ```
 
-Expect every `pod` non-empty and every `sel` **empty**. Then prove the upgrade path on a live install
-(install on k3d, then `make k3d.update`) — a label that leaked into a selector fails there and nowhere
-earlier. Confirm the kgateway proxy pods pick up `infrastructure.labels` with
+Expect an identity label set on all 14 pod templates and all 3 Gateways, and the third column `0`
+everywhere. The two argo-workflows pods are expected to be blank.
+
+Then check `planeID` really threads through — the pod label must equal the agent's argv, or the logs
+and the gateway connection disagree about which plane they belong to:
+
+```bash
+helm template rel install/helm/openchoreo-data-plane -f test/e2e/k3d/values-dp.yaml \
+  --set clusterAgent.planeID=dp-eu-1 \
+| yq 'select(.kind=="Deployment") | {
+    "pod-label": .spec.template.metadata.labels["openchoreo.dev/plane-id"],
+    "argv": (.spec.template.spec.containers[0].args // [] | map(select(test("plane-id"))) | join(""))}'
+```
+
+Finally prove the upgrade path on a live install (install on k3d, then `make k3d.update`) — a label
+that leaked into a selector fails there and nowhere earlier — and confirm the kgateway proxy pods
+picked the labels up:
 `kubectl get pod -n openchoreo-data-plane -l openchoreo.dev/plane=dataplane --show-labels`.
 
 **Observer endpoint**
