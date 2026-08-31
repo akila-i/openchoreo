@@ -1,0 +1,499 @@
+# Platform (system-component) logs — implementation plan
+
+**Authors**:
+_@akila-i_
+
+**Reviewers**:
+_TBD_
+
+**Created Date**:
+_2026-08-31_
+
+**Status**:
+_Submitted_
+
+**Related Issues/PRs**:
+Epic [#4089](https://github.com/openchoreo/openchoreo/issues/4089) ·
+Proposal discussion [#4501](https://github.com/openchoreo/openchoreo/discussions/4501) ·
+Sub-tasks [#4554](https://github.com/openchoreo/openchoreo/issues/4554),
+[#4556](https://github.com/openchoreo/openchoreo/issues/4556),
+[#4557](https://github.com/openchoreo/openchoreo/issues/4557),
+[#4559](https://github.com/openchoreo/openchoreo/issues/4559),
+[#4560](https://github.com/openchoreo/openchoreo/issues/4560)
+
+---
+
+## Summary
+
+OpenChoreo's observability plane serves logs for **user workloads** (`dp-*` pods) and **workflow runs**
+(`workflow-*` pods). It has no first-class way to observe OpenChoreo's *own* pods — the control-plane
+`controller-manager` / `openchoreo-api` / `cluster-gateway`, the per-plane `cluster-agent`s, the
+observability-plane observer / sre-agent / finops-agent, and the kgateway proxies.
+
+This document is the implementation plan for the **`openchoreo/openchoreo` half** of epic #4089:
+identity labels on platform pods, the plane-CR discoverability field, the
+`GET /api/v1alpha1/platform-logs` observer endpoint plus its adapter contract, `platformlogs:view`
+authorization, and the `query_platform_logs` MCP tool.
+
+It is an implementation plan, not a design proposal — the design was agreed in discussion #4501. It
+records the decisions that were still open after that discussion, and the concrete file-level work each
+one implies.
+
+---
+
+## Motivation
+
+To debug a stuck reconcile, a failing `openchoreo-api`, or a crash-looping `cluster-agent`, an operator
+today drops to `kubectl logs` / `kubectl top pod` / `kubectl get events` on each cluster. That is
+inconsistent with the workload experience, gives no single pane across a multi-cluster topology,
+requires cluster credentials, and is invisible to anyone without direct `kubectl` access.
+
+It is also the prerequisite for the use case the feature originates from: platform-engineering teams
+asking to set alerts that monitor OpenChoreo itself.
+
+The feature is **opt-in**. Platform logs (controllers, API server) are noisy and can fill a logs backend
+quickly, so nothing is collected until a platform engineer enables it.
+
+---
+
+## Goals
+
+- Platform pods across all four planes carry enough identity to be attributed to a plane at query time.
+- One observer endpoint serves platform logs for a selected plane, reusing the existing adapter
+  architecture.
+- Operator/admin-scoped authorization, distinct from workload log access.
+- The same contract is available to the portal (later) and to MCP clients.
+
+---
+
+## Non-Goals
+
+**Signals.** Logs only. Metrics and Kubernetes events follow the same identity model and endpoint shape
+but are not implemented here — the epic title should be narrowed, or they should be split into their own
+epic. Distributed traces are out of scope entirely: platform components are not instrumented for tracing.
+
+**Coverage boundary.** Only Helm-installed workloads. `kube-system` — CoreDNS, kube-proxy, the CNI, the
+API server — is a layer below OpenChoreo and is not collected. Static pods could not be labelled anyway,
+and on GKE/EKS the provider's addon manager would revert pod-label patches. The UI must say where this
+boundary is, or a quiet view reads as a healthy cluster.
+
+**Deferred from this slice**, each additive to the contract later: a `level` filter ·
+`totalRelation: eq|gte` · `include=facets,histogram` · cursor pagination · per-plane ABAC.
+
+Facets are the one with a sequencing consequence — they should land before the portal work, or the
+portal ships one request per picker and someone unpicks it later.
+
+**Other repositories.** Named in [Impact](#impact) but not planned here.
+
+---
+
+## Impact
+
+| Area | Change |
+|---|---|
+| Helm charts (all 4 planes) | New pod-template labels ⇒ **one rolling restart** of the control plane, agents and gateways on upgrade. Belongs in the release notes |
+| `api/v1alpha1` | New optional `platformObservabilityPlaneRef` on six plane specs. Additive, no migration |
+| openchoreo-api | One new authenticated metadata endpoint; six plane spec schemas gain a field |
+| Observer | One new endpoint, one new service, one new authz action |
+| Authorization | New cluster-scoped `platformlogs:view`; the `observer-resource-reader` service role gains six plane read actions |
+| Adapter contract | New path on `openapi/observability-logs-adapter-api.yaml` — **see the cross-repo hazard in [WS3](#ws3--contracts-spec-half-of-4556-and-4557)** |
+
+### Out of scope here, named so nothing silently drops
+
+| Item | Repo |
+|---|---|
+| Namespace-gated collection + platform index/retention for the three Fluent Bit modules (#4555) | community-modules |
+| Azure DCR recipe; GCP Log Router sink + `_Default` exclusion; required `clusterInstance` on every collector | community-modules |
+| `platform-logs/query` implementations in all five adapters (#4557) — the **spec** is in WS3 | community-modules |
+| Portal platform-logs view (#4558) and plane entity tabs | backstage-plugins |
+| External component opt-in docs (#4562); per-module namespace-gate recipes; the upgrade note | openchoreo.github.io |
+
+---
+
+## Design
+
+### Decisions this plan is built on
+
+| Decision | Value |
+|---|---|
+| Release scope | Thin vertical slice for v1.3.0; everything else sequenced after |
+| Authorization | Trust the chart-set `openchoreo.dev/plane` label. One cluster-scoped `platformlogs:view`. The real boundary is the namespace allowlist keeping `dp-*` / `workflow-*` out of the platform index |
+| planeName → planeID | **Observer resolves via openchoreo-api.** No new plane endpoint needed — the six plane GETs already exist and already return `spec.planeID` |
+| `planeKind` enum | 7 CR kinds + `Other`; the observer collapses to the 4 label values internally |
+| Response extras | `PlatformLogsResponse` + `403` only |
+| Collection gate | Namespace allowlist in the observability module, **not** a pod label. Pod labels are attribution only |
+
+> **Note on epic #4089's body.** Its layer-2 section still describes gating collection with an
+> `Exclude_Path` on `*_dp-*_*.log`. That was superseded by the namespace-allowlist gate agreed in the
+> Aug 25 comment on discussion #4501, and this plan follows the namespace gate.
+
+### Identity model
+
+Identity travels on **pod labels**, set by the chart that creates the pod, landing at
+`kubernetes.labels.*` via the collector's Kubernetes metadata filter — the same mechanism workload logs
+already use, so no new collector capability is needed.
+
+| Label | Value | Set on |
+|---|---|---|
+| `openchoreo.dev/plane` | `controlplane` \| `dataplane` \| `workflowplane` \| `observabilityplane` | Plane-owned pods. **Omitted** for external/shared components, so `!openchoreo.dev/plane` selects them |
+| `openchoreo.dev/plane-id` | the install's `planeID` | Plane-owned pods, except the control plane (a singleton) |
+| `openchoreo.dev/cluster-instance` | e.g. `cluster1` | Stamped by the **collector**, not the chart — it is the one component that is genuinely one-per-cluster |
+
+`(cluster-instance, plane-id)` is the unique key: `planeID` defaults to `default` in every plane chart,
+so two clusters running defaults would otherwise be indistinguishable.
+
+**Plane CR → pods is resolved at query time, not stamped.** Multiple plane CRs may share one `planeID`
+(explicitly supported — see the field's doc comment on the plane types), so no single CR name can be
+written onto a pod. Pods carry physical identity; the observer maps the selected plane CR to its
+`spec.planeID`. N CRs sharing a planeID resolve to the same filter, which is correct — they share pods.
+
+### Reuse map — what already exists
+
+| Need | Existing thing to reuse |
+|---|---|
+| Chart-wide extra labels | `global.commonLabels` in all 4 charts — but it reaches **object** `metadata.labels` only, never pod templates |
+| Label helpers | `<chart>.labels` / `.selectorLabels` / `.componentLabels` / `.componentSelectorLabels`, byte-identical across all 4 `_helpers.tpl` |
+| Gateway pod labels | `install/helm/openchoreo-data-plane/values.yaml:80-89` already sets `gateway.infrastructure.labels` (`openchoreo.dev/system-component: gateway`) — the precedent |
+| Plane ref type | `ObservabilityPlaneRef` / `ClusterObservabilityPlaneRef` (`api/v1alpha1/types.go:182-233`), typed `{Kind, Name}`, no namespace |
+| Plane ref resolution | `internal/controller/reference.go` — `GetObservabilityPlaneFromRef:261`, `getDefaultObservabilityPlane:297`, `clusterObsRefToObsRef:324`, `ObservabilityPlaneResult.GetPlaneID:226` |
+| planeID over HTTP | `openapi/openchoreo-api.yaml` — all six plane GETs exist, and all six `*PlaneSpec` schemas already expose `planeID` (`:7691, 7823, 7988, 8073, 8152, 8252`) |
+| Observer → OC API client | `internal/observer/service/uid_resolver.go` — OAuth client-credentials, token cache, retry (`fetchResourceUID:161`, `doFetchResourceUID:183`) |
+| GET endpoint with query params | `internal/observer/api/handlers/finops.go` + reusable `components.parameters` at `openapi/observer-api.yaml:910-972` |
+| Authz decorator | `internal/observer/service/logs_authz.go` (54 lines) + `internal/observer/authz/helpers.go:95 CheckAuthorization` |
+| Action registry | `internal/authz/core/actions.go` — consts `:249-282`, registry entries `:516-548` |
+| MCP tool template | `internal/observer/mcp/server.go:45-81` (`query_component_logs`), `createSchema` / `stringProperty` / `limitLogsProperty` helpers |
+| End-to-end precedent | commit `0d6c4cb73` (FinOps observer endpoint) — 30 files, the exact footprint of "new observer endpoint + adapter contract + authz + helm" |
+
+---
+
+### WS1 — Identity labels on platform pods (#4554)
+
+**Two hazards, both confirmed.** (a) All 13 Deployments render `spec.selector.matchLabels` and
+`spec.template.metadata.labels` from the *same* expression, so anything added via a selector helper
+lands in the immutable selector and makes `helm upgrade` **fail** on existing installs rather than
+adding the label. (b) There is no pod-labels-only seam today.
+
+**Approach: one new helper per chart, one `include` line per pod template. Selectors untouched.** Do not
+extend `selectorLabels` / `componentSelectorLabels`, and do not route this through `global.commonLabels`.
+
+1. Add to each `install/helm/openchoreo-*/templates/_helpers.tpl`:
+
+```gotemplate
+{{/*
+Platform identity labels for platform-logs attribution.
+POD TEMPLATES ONLY - never spec.selector.matchLabels (immutable; would break helm upgrade).
+*/}}
+{{- define "openchoreo-data-plane.platformIdentityLabels" -}}
+openchoreo.dev/plane: dataplane
+openchoreo.dev/plane-id: {{ .Values.clusterAgent.planeID | default .Release.Name | quote }}
+{{- end }}
+```
+
+- The control plane emits **only** `openchoreo.dev/plane: controlplane` — it is a singleton and the chart
+  has no `clusterAgent` block, so no `planeID` exists there.
+- Data / workflow / observability planes emit both. The `planeID` expression must match the agent's argv
+  verbatim (`templates/cluster-agent/deployment.yaml:63`,
+  `{{ .Values.clusterAgent.planeID | default .Release.Name }}`) or the logs and the gateway connection
+  disagree about which plane they belong to.
+- Unconditional — no new values key, so no `values.schema.json` churn. Labels alone collect nothing;
+  collection is gated by namespace in the module, which is also why the originally proposed
+  `observability.enabled` toggle is dropped rather than renamed.
+
+2. Add one line to each of the **14** pod templates. Pattern B (literal component + `selectorLabels`):
+
+```yaml
+      labels:
+        app.kubernetes.io/component: api-server
+        {{- include "openchoreo-control-plane.selectorLabels" . | nindent 8 }}
+        {{- include "openchoreo-control-plane.platformIdentityLabels" . | nindent 8 }}
+```
+
+Pattern A (`componentSelectorLabels` dict form) takes the same extra line with `.` unchanged.
+
+Full list — **CP**: `controller-manager`, `openchoreo-api`, `backstage`, `cluster-gateway`,
+`event-forwarder`, `portal-assistant` deployments + `templates/authz/bootstrap-job.yaml` (Job pod
+template; its selector is system-generated, so it is safe). **DP**: `cluster-agent`. **WP**:
+`cluster-agent`. **OP**: `cluster-agent`, `controller-manager`,
+`observer/observer-deployment.yaml`, `sre-agent`, `finops-agent`.
+
+3. **Gateway CRs** — kgateway creates those pods from the `Gateway` CR, so no chart helper reaches them.
+   Merge identity labels into `spec.infrastructure.labels` in all three `templates/gateway/gateway.yaml`
+   (CP, DP, OP). The current shape is a blanket
+   `{{- with .Values.gateway.infrastructure }}{{- toYaml . | nindent 4 }}{{- end }}`; replace it with a
+   merge that emits `labels` unconditionally and preserves any other `infrastructure` keys (sprig `omit`
+   / `mustMerge`). Only DP has a non-empty default today.
+
+   **Verify on k3d before merging** that kgateway applies `infrastructure.labels` to the generated proxy
+   Deployment's pod template and *not* to its selector — if it reaches the selector, the same
+   immutability failure applies to gateway upgrades.
+
+4. **Known gaps to state in the PR, not fix here:** the workflow-plane `argo-workflows` subchart pods
+   (label via the subchart's own `podLabels` values if supported) and community-module pods installed
+   into the OP namespace (fluent-bit, OpenSearch). Unlabelled pods in a collected namespace surface under
+   `Other / Shared` — correct behaviour, worth documenting.
+
+5. **Upgrade note:** this mutates pod templates, so it triggers one rolling restart of the control plane,
+   agents and gateways.
+
+---
+
+### WS2 — `platformObservabilityPlaneRef` + control-plane discoverability (#4559)
+
+1. **CRD types** — add to all six specs in `api/v1alpha1/`:
+   `dataplane_types.go`, `workflowplane_types.go`, `observabilityplane_types.go` get
+   `PlatformObservabilityPlaneRef *ObservabilityPlaneRef`;
+   `clusterdataplane_types.go`, `clusterworkflowplane_types.go`, `clusterobservabilityplane_types.go`
+   get `*ClusterObservabilityPlaneRef` **with the same XValidation guard** already used at
+   `clusterdataplane_types.go:38-49`. Note `ObservabilityPlaneSpec` has no ref fields today — this is its
+   first (an OP's own platform logs may go to a different OP, or to itself).
+
+2. **Resolution helper** — extend `internal/controller/reference.go` with
+   `GetPlatformObservabilityPlaneFromRef`, reusing `clusterObsRefToObsRef` and
+   `getDefaultObservabilityPlane`. **Fallback order: `platformObservabilityPlaneRef` →
+   `observabilityPlaneRef` → the `default` OP.** Falling back to the existing ref means a fresh install
+   works with no new configuration; state that in the field's doc comment.
+
+3. **Regenerate** — `make manifests` → `make generate` → `make helm-generate`. Chart CRD copies under
+   `install/helm/openchoreo-control-plane/crds/` are produced by `tools/helm-gen/crd.go`; never hand-edit.
+
+4. **openchoreo-api spec** — `openapi/openchoreo-api.yaml` is hand-maintained, so add
+   `platformObservabilityPlaneRef` to the six `*PlaneSpec` schemas by hand, then `make openapi-codegen`.
+
+5. **Control-plane metadata endpoint** — the CP has no CR. Follow the `oauth_metadata.go` chain exactly:
+   - `install/helm/openchoreo-control-plane/values.yaml` →
+     `openchoreoApi.config.platformObservability.observabilityPlaneRef.{kind,name}`
+   - `templates/openchoreo-api/configmap.yaml` → new `platform_observability:` koanf section
+   - `internal/openchoreo-api/config/` → new section struct + `Config` field
+   - `openapi/openchoreo-api.yaml` → `GET /api/v1/platform-observability`, `tags: [Operations]`.
+     **Keep it authenticated** (no `security: []` — unlike the OAuth metadata document, this is operator
+     information). No new authz action; it discloses only a ref.
+   - `internal/openchoreo-api/api/handlers/` → new handler method on `*Handler` reading `h.Config`
+   - Response: `{planeKind: ControlPlane, observabilityPlaneRef: {kind, name}}`. The portal resolves the
+     ref to an `observerURL` through the existing observability-plane GETs — do not duplicate that here.
+
+6. **`planeID` uniqueness** — two data planes installed into one cluster with default values both get
+   `planeID: default` and become indistinguishable, which is exactly the topology this epic exists to
+   support. The charts already carry a `| default .Release.Name` expression in templates while
+   `values.yaml` hardcodes `default`; changing the values default to empty so the release-name fallback
+   actually fires is the smallest fix. **Treat as a separate PR** — it changes existing installs' plane
+   identity.
+
+---
+
+### WS3 — Contracts (spec half of #4556 and #4557)
+
+Land the **observer spec first**, then the adapter spec, so the shapes agree.
+
+#### `openapi/observer-api.yaml` — `GET /api/v1alpha1/platform-logs`
+
+Declare parameters as reusable `components.parameters` entries following the FinOps precedent
+(`:910-972`).
+
+This is a deliberate divergence from `POST /api/v1/logs/query`: platform scope is a fixed set of
+Kubernetes coordinates, so there is nothing for a `oneOf` to discriminate between, and a GET gives the
+portal a shareable, cacheable URL — which is what the permalink and deep-link behaviour rests on.
+**State this in the path description** so the asymmetry reads as a decision. The existing
+`ComponentSearchScope` / `WorkflowSearchScope` union stays untouched.
+
+| Param | Notes |
+|---|---|
+| `planeKind` | **required**, enum: `ControlPlane, DataPlane, ClusterDataPlane, WorkflowPlane, ClusterWorkflowPlane, ObservabilityPlane, ClusterObservabilityPlane, Other` |
+| `planeName` | required unless `planeKind` ∈ {`ControlPlane`, `Other`} — enforce server-side with a 400 |
+| `planeNamespace` | required for the three namespaced kinds. **Named distinctly on purpose**: `namespace` below means the platform pod's namespace, a different thing |
+| `namespace`, `podName`, `containerName` | repeatable, each with `maxItems: 20`, enforced server-side with a 400 (not truncated) |
+| `clusterInstance` | optional; the only scope `Other / Shared` records have once `plane` is absent |
+| `startTime`, `endTime` | **required**, absolute RFC3339 UTC |
+| `limit` | 1–1000, default 100 |
+| `sortOrder` | `asc` \| `desc`, default `desc` |
+| `labels` | Kubernetes label-selector string, `maxLength: 256` |
+| `searchPhrase` | `maxLength: 256` |
+
+Every list needs a declared `maxItems` because a query string has length limits a request body would not
+— the same class of concern that produced the 256-character `searchPhrase` cap.
+
+Schemas:
+
+- `PlatformLog` — camelCase, and use **`log`** for the message field to match `ComponentLogEntry` /
+  `WorkflowLogEntry` (the discussion said `message`; consistency wins):
+  `{timestamp, log, level, planeKind, planeId, clusterInstance, namespaceName, podName, containerName}`.
+- `PlatformLogsResponse` — `{tookMs, total, logs}`, all required, mirroring `LogsQueryResponse`. Point
+  the `200` here, not at a bare array.
+- Responses `200, 400, 401, 403, 500`, all errors `$ref: ErrorResponse`. `403` is separate from `401`
+  because a plane-level authorization denial is a different remedy and the UI shows different copy.
+
+#### `openapi/observability-logs-adapter-api.yaml` — `POST /api/v1alpha1/platform-logs/query`
+
+**POST, not GET**, and a separate path rather than a third `searchScope` variant. Reasons: the observer
+sends *resolved physical* identity rather than names; all five modules discriminate the existing
+`searchScope` union on "`workflowRunName` is non-nil", so a third member would need a new discriminator
+in five places; and there is no gateway URL-length concern on an in-cluster hop.
+
+Request `PlatformLogsQueryRequest`:
+
+```jsonc
+{
+  "startTime": "…", "endTime": "…", "limit": 100, "sortOrder": "desc",
+  "labels": "…", "searchPhrase": "…",
+  "scope": {
+    "plane": "controlplane|dataplane|workflowplane|observabilityplane", // collapsed; omitted for Other
+    "unattributed": false,                                              // true => !openchoreo.dev/plane
+    "planeId": "…", "clusterInstance": "…",
+    "namespaces": [], "podNames": [], "containerNames": []
+  }
+}
+```
+
+Response `PlatformLogsResponse` — same shape as the observer's.
+
+> **Cross-repo hazard to flag on the PR.** All five community-modules Makefiles fetch this spec from
+> `main`
+> (`SPEC := https://raw.githubusercontent.com/openchoreo/openchoreo/main/openapi/observability-logs-adapter-api.yaml`),
+> and it drives a `strict-server` interface. A new path adds a method to `StrictServerInterface`, so each
+> module fails to compile the next time it regenerates until it implements it. Land 501 stubs in the
+> modules promptly after merging this spec.
+
+---
+
+### WS4 — Observer implementation + authorization (#4556)
+
+The footprint mirrors `0d6c4cb73`. Note the observer does **not** use the generated server — routes are
+hand-registered in `cmd/observer/main.go` and logs use hand-written types in `internal/observer/types/`
+— so follow that, not `server.gen.go`.
+
+**New files**
+
+- `internal/observer/types/platformlogs.go` — `PlatformLogsQueryRequest`, `PlatformLog`,
+  `PlatformLogsResponse`; error codes appended to `internal/observer/types/errors.go` (`OBS-V1-PL-*`,
+  alongside `OBS-V1-L-01..05`)
+- `internal/observer/api/handlers/platformlogs.go` — `GetPlatformLogs`, shaped like `finops.go`; read
+  repeatables with `r.URL.Query()["namespace"]`; map `ErrAuthzForbidden` → 403,
+  `ErrAuthzUnauthorized` → 401 exactly as `logs.go` does
+- `internal/observer/service/platform_logs.go` — `PlatformLogsService`: resolve
+  (`planeKind`, `planeNamespace`, `planeName`) → `planeID`, collapse the 7 CR kinds to the 4 label
+  values, map `Other` → `unattributed: true`, call the adapter
+- `internal/observer/service/platform_logs_adapter.go` — use the **generated** `logsadapterclientgen`
+  client (as `finops_adapter.go` does), not the hand-rolled structs in `logs_adapter.go`
+- `internal/observer/service/platform_logs_authz.go` — decorator; `ActionViewPlatformLogs` with an
+  **empty `ResourceHierarchy`** (cluster scope). The Casbin PDP decides on `Resource.Hierarchy` and
+  ignores `Resource.ID`, so do not put `planeName` in the hierarchy and expect it enforced — per-plane
+  ABAC is explicitly out of scope for this slice
+
+**Edited files**
+
+- `internal/observer/service/uid_resolver.go` — add `GetPlaneID(ctx, kind, namespace, name)` hitting the
+  existing six OC API plane GETs. `fetchResourceUID` extracts `metadata.uid`; refactor its
+  auth / retry / token machinery into a shared fetch that returns the decoded body so the new method can
+  read `spec.planeID` without duplicating it
+- `internal/observer/service/interfaces.go` — `PlatformLogsQuerier`
+- `internal/observer/api/handlers/handler.go` — new service field + `NewHandler` param
+- `internal/observer/api/handlers/validations.go` — `ValidatePlatformLogsQueryRequest`: reuse
+  `ValidateTimeRange` (`maxQueryTimeRange = 30d`), `ValidateAndSetLimit`, `ValidateAndSetSortOrder`; add
+  the `maxItems` caps, the 256-character caps, and planeName / planeNamespace requiredness per kind
+- `internal/authz/core/actions.go` — `ActionViewPlatformLogs = "platformlogs:view"` const near `:249-282`
+  and registry entry `{Name: ActionViewPlatformLogs, LowestScope: ScopeCluster, IsInternal: false}` near
+  `:516-548`. No `conditionRegistry` entry — no CEL attributes apply at cluster scope
+- `internal/observer/authz/constants.go` — matching `Action` constant
+- `cmd/observer/main.go` — construct the service, wrap with authz beside the other `New*ServiceWithAuthz`
+  calls (`:218-231`), pass into both `apihandler.NewHandler` and `observermcp.NewMCPHandler`, and register
+  `api.HandleFunc("GET /api/v1alpha1/platform-logs", newAPIHandler.GetPlatformLogs)`
+- `.mockery.yaml` — add `PlatformLogsQuerier` to the `internal/observer/service` block (`:138-150`)
+- `install/helm/openchoreo-control-plane/values.yaml` — **two grants, both easy to miss:**
+  1. `platformlogs:view` on the operator / PE roles (`admin` already has `*`)
+  2. the six plane view actions (`dataplane:view`, `clusterdataplane:view`, `workflowplane:view`,
+     `clusterworkflowplane:view`, `observabilityplane:view`, `clusterobservabilityplane:view`) added to
+     the `observer-resource-reader` role at `:1303-1309` — without these, planeID resolution 403s
+
+No new observer config: the endpoint reuses `LOGS_ADAPTER_URL` / `UID_RESOLVER_*`.
+
+---
+
+### WS5 — `query_platform_logs` MCP tool (#4560)
+
+- `internal/observer/mcp/server.go` — tool 14 in `registerTools`, built with `createSchema` /
+  `stringProperty` / `arrayProperty` / `limitLogsProperty` / `sortOrderProperty`; args as an anonymous
+  struct with snake_case `json:` tags (`plane_kind`, `plane_name`, `plane_namespace`, `namespace`,
+  `pod_name`, `container_name`, `cluster_instance`, `start_time`, `end_time`, `search_phrase`, `labels`,
+  `limit`, `sort_order`). Required: `plane_kind`, `start_time`, `end_time`
+- `internal/observer/mcp/handlers.go` — `QueryPlatformLogs`; add the service to `MCPHandler` and its
+  nil-check list in `NewMCPHandler`
+- `internal/observer/mcp/helpers.go` — `validatePlatformScope` (planeName / planeNamespace requiredness
+  per kind), reusing `setDefaults`
+- `internal/observer/mcp/server_test.go` — new `allToolSpecs` entry **and** an `expectedTypes` entry in
+  `TestSchemaPropertyTypes`; plus `handlers_test.go` / `helpers_test.go`
+- `test/e2e/suites/observability/observer_mcp_test.go:47-63` — `allObserverTools` is **already stale**: it
+  lists 11 names and is missing `query_costs` / `query_recommendations` from `69f9093a9`. Update it to the
+  full 14
+
+---
+
+### Suggested order
+
+```
+WS1 (chart labels) ──┐
+WS2 (discoverability)┴─→ WS3 (observer spec → adapter spec) ─→ WS4 (observer + authz) ─→ WS5 (MCP)
+```
+
+WS1 and WS2 are independent of each other and of the contracts, so they can go in parallel. WS3's two
+specs are strictly ordered. WS5 is blocked on WS4.
+
+---
+
+## Verification
+
+**Static / unit**
+
+```bash
+make lint
+make test
+make code.gen && git diff --exit-code    # catches CRD, values.schema.json and oapi-codegen drift
+```
+
+**Chart labels — the selector-immutability check that matters most**
+
+```bash
+for c in control data workflow observability; do
+  helm template test install/helm/openchoreo-$c-plane \
+    | yq 'select(.kind=="Deployment" or .kind=="Job") |
+          {"n": .metadata.name,
+           "pod": .spec.template.metadata.labels | with_entries(select(.key|test("openchoreo.dev/plane"))),
+           "sel": .spec.selector.matchLabels    | with_entries(select(.key|test("openchoreo.dev/plane")))}'
+done
+```
+
+Expect every `pod` non-empty and every `sel` **empty**. Then prove the upgrade path on a live install
+(install on k3d, then `make k3d.update`) — a label that leaked into a selector fails there and nowhere
+earlier. Confirm the kgateway proxy pods pick up `infrastructure.labels` with
+`kubectl get pod -n openchoreo-data-plane -l openchoreo.dev/plane=dataplane --show-labels`.
+
+**Observer endpoint**
+
+- Handler tests alongside `internal/observer/api/handlers/logs_test.go`: the 400 cases (missing
+  `planeName` for a named kind, `maxItems` exceeded, `searchPhrase` > 256, time range > 30d), 401 / 403
+  mapping, and the happy path against the mocked `PlatformLogsQuerier`
+- Service tests with a stubbed adapter and stubbed resolver: assert the 7 → 4 kind collapse, `Other` →
+  `unattributed`, and that `planeNamespace` is not confused with the log-filter `namespace`
+- Manual: port-forward the observer and
+  `curl -H "Authorization: Bearer $TOKEN" '.../api/v1alpha1/platform-logs?planeKind=ControlPlane&startTime=…&endTime=…'`
+
+**MCP** — `make test` covers the table-driven schema tests; then the tier3 e2e
+`test/e2e/suites/observability/observer_mcp_test.go` for the 14-tool assertion.
+
+**Real end-to-end is blocked on a companion community-modules PR** and cannot be closed out from this
+repo. Two specifics worth knowing when planning that PR:
+
+- `observability-logs-opensearch/init/setup-opensearch.sh:60-142` sets the `container-logs-*` index
+  template to `"dynamic": false` with an OpenChoreo-label allowlist, so platform pod labels are stored but
+  **not indexed** — platform queries cannot work on OpenSearch until that template changes.
+- `observability-logs-openobserve` has a dynamic schema and is what `make/e2e.mk:1053-1074` already
+  installs, so it is the practical first backend for validating this contract.
+
+---
+
+## Appendix
+
+- Epic [#4089](https://github.com/openchoreo/openchoreo/issues/4089) and proposal discussion
+  [#4501](https://github.com/openchoreo/openchoreo/discussions/4501), including the Aug 18 meeting notes
+  (opt-in decision) and the Aug 25 comment (namespace collection gate).
+- Existing contracts touched: `openapi/observer-api.yaml`, `openapi/observability-logs-adapter-api.yaml`,
+  `openapi/openchoreo-api.yaml`.
+- Closest implementation precedent: commit `0d6c4cb73`, the FinOps observer endpoint.
