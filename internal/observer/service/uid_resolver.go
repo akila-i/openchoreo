@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openchoreo/openchoreo/internal/observer/config"
+	"github.com/openchoreo/openchoreo/internal/observer/types"
 )
 
 // tokenCache holds the OAuth2 access token with its expiration
@@ -157,33 +158,125 @@ func (r *ResourceUIDResolver) GetEnvironmentUID(ctx context.Context, namespaceNa
 	return uid, nil
 }
 
-// fetchResourceUID makes an HTTP GET request to the openchoreo-api and extracts data.uid
+// planePathsByKind maps a plane CR kind to its openchoreo-api path template. The namespace-scoped
+// kinds take (namespace, name); the cluster-scoped ones take (name) only.
+var planePathsByKind = map[types.PlaneKind]string{
+	types.PlaneKindDataPlane:                 "/api/v1/namespaces/%s/dataplanes/%s",
+	types.PlaneKindWorkflowPlane:             "/api/v1/namespaces/%s/workflowplanes/%s",
+	types.PlaneKindObservabilityPlane:        "/api/v1/namespaces/%s/observabilityplanes/%s",
+	types.PlaneKindClusterDataPlane:          "/api/v1/clusterdataplanes/%s",
+	types.PlaneKindClusterWorkflowPlane:      "/api/v1/clusterworkflowplanes/%s",
+	types.PlaneKindClusterObservabilityPlane: "/api/v1/clusterobservabilityplanes/%s",
+}
+
+// GetPlaneID resolves a plane CR to its spec.planeID.
+//
+// Platform log records carry physical identity - the planeID of the installation that produced
+// them - rather than a CR name, because several CRs may share one planeID. Resolving here is what
+// lets a caller name a plane while the query filters on the label the collector actually stamped.
+//
+// The plane CRs live in the control-plane cluster, which the observer's own Kubernetes client
+// cannot reach, so this goes through openchoreo-api like the UID resolvers do.
+func (r *ResourceUIDResolver) GetPlaneID(
+	ctx context.Context,
+	kind types.PlaneKind,
+	namespace, name string,
+) (string, error) {
+	template, ok := planePathsByKind[kind]
+	if !ok {
+		return "", fmt.Errorf("plane kind %q has no plane CR to resolve", kind)
+	}
+	if name == "" {
+		return "", fmt.Errorf("plane name is required to resolve a %s", kind)
+	}
+
+	var path string
+	if strings.Count(template, "%s") == 2 {
+		if namespace == "" {
+			return "", fmt.Errorf("plane namespace is required to resolve a %s", kind)
+		}
+		path = fmt.Sprintf(template, url.PathEscape(namespace), url.PathEscape(name))
+	} else {
+		path = fmt.Sprintf(template, url.PathEscape(name))
+	}
+
+	body, err := r.fetchResource(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve planeID for %s %q: %w", kind, name, err)
+	}
+
+	var response struct {
+		Spec struct {
+			PlaneID string `json:"planeID"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("failed to decode %s response: %w", kind, err)
+	}
+	if response.Spec.PlaneID == "" {
+		// planeID is optional on the namespace-scoped kinds and defaults to the CR name, which is
+		// also what the plane charts fall back to when planeID is left unset.
+		r.logger.Debug("Plane has no explicit planeID; falling back to the CR name",
+			"kind", kind, "name", name)
+		return name, nil
+	}
+
+	r.logger.Debug("Resolved planeID", "kind", kind, "name", name, "planeID", response.Spec.PlaneID)
+	return response.Spec.PlaneID, nil
+}
+
+// fetchResourceUID makes an HTTP GET request to the openchoreo-api and extracts metadata.uid
 func (r *ResourceUIDResolver) fetchResourceUID(ctx context.Context, path string) (string, error) {
+	body, err := r.fetchResource(ctx, path)
+	if err != nil {
+		return "", err
+	}
+
+	var response struct {
+		Metadata struct {
+			UID string `json:"uid"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	if response.Metadata.UID == "" {
+		return "", fmt.Errorf("uid not found in response")
+	}
+
+	r.logger.Debug("Resolved resource UID", "path", path, "uid", response.Metadata.UID)
+	return response.Metadata.UID, nil
+}
+
+// fetchResource makes an HTTP GET request to the openchoreo-api and returns the raw response
+// body. Callers decode whichever field they need - metadata.uid for the UID resolvers,
+// spec.planeID for plane resolution - while sharing this method's auth, retry and error mapping.
+func (r *ResourceUIDResolver) fetchResource(ctx context.Context, path string) ([]byte, error) {
 	// Skip API call if not configured
 	if r.config.OpenChoreoAPIURL == "" {
-		return "", fmt.Errorf("openchoreo API URL not configured")
+		return nil, fmt.Errorf("openchoreo API URL not configured")
 	}
 
 	// Build request URL
 	reqURL := strings.TrimSuffix(r.config.OpenChoreoAPIURL, "/") + path
 	for attempt := 0; attempt < (r.config.MaxAuthRetry + 1); attempt++ {
-		uid, err, retry := r.doFetchResourceUID(ctx, reqURL, path, attempt)
+		body, err, retry := r.doFetchResource(ctx, reqURL, path, attempt)
 		if retry {
 			continue
 		}
-		return uid, err
+		return body, err
 	}
 	// Unreachable: every loop iteration either returns or continues (401 retry path).
 	// Kept as a defensive fallback.
-	return "", fmt.Errorf("%w: retry loop exhausted", ErrScopeAuthFailed)
+	return nil, fmt.Errorf("%w: retry loop exhausted", ErrScopeAuthFailed)
 }
 
-// doFetchResourceUID performs a single HTTP attempt to fetch a resource UID.
-// It returns (uid, err, retry) where retry=true signals the caller to retry (401 case).
-func (r *ResourceUIDResolver) doFetchResourceUID(ctx context.Context, reqURL, path string, attempt int) (string, error, bool) {
+// doFetchResource performs a single HTTP attempt to fetch a resource.
+// It returns (body, err, retry) where retry=true signals the caller to retry (401 case).
+func (r *ResourceUIDResolver) doFetchResource(ctx context.Context, reqURL, path string, attempt int) ([]byte, error, bool) {
 	token, err := r.getAccessToken(ctx)
 	if err != nil {
-		return "", fmt.Errorf("%w: failed to obtain access token: %w", ErrScopeAuthFailed, err), false
+		return nil, fmt.Errorf("%w: failed to obtain access token: %w", ErrScopeAuthFailed, err), false
 	}
 
 	reqCtx, reqCancel := context.WithTimeout(ctx, r.config.Timeout)
@@ -191,7 +284,7 @@ func (r *ResourceUIDResolver) doFetchResourceUID(ctx context.Context, reqURL, pa
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err), false
+		return nil, fmt.Errorf("failed to create request: %w", err), false
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -201,7 +294,7 @@ func (r *ResourceUIDResolver) doFetchResourceUID(ctx context.Context, reqURL, pa
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err), false
+		return nil, fmt.Errorf("request failed: %w", err), false
 	}
 	defer resp.Body.Close()
 
@@ -209,34 +302,16 @@ func (r *ResourceUIDResolver) doFetchResourceUID(ctx context.Context, reqURL, pa
 	case http.StatusOK:
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return "", fmt.Errorf("failed to read response body: %w", err), false
+			return nil, fmt.Errorf("failed to read response body: %w", err), false
 		}
 
-		r.logger.Debug("Raw UID resolver response", "path", path, "status", resp.StatusCode, "body", string(body))
+		r.logger.Debug("Raw openchoreo-api response", "path", path, "status", resp.StatusCode, "body", string(body))
 
-		var response struct {
-			Metadata struct {
-				UID string `json:"uid"`
-			} `json:"metadata"`
-		}
-
-		if err := json.Unmarshal(body, &response); err != nil {
-			return "", fmt.Errorf("failed to decode response: %w", err), false
-		}
-
-		if response.Metadata.UID == "" {
-			return "", fmt.Errorf("uid not found in response"), false
-		}
-
-		r.logger.Debug("Resolved resource UID",
-			"path", path,
-			"uid", response.Metadata.UID)
-
-		return response.Metadata.UID, nil, false
+		return body, nil, false
 
 	case http.StatusNotFound:
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return "", fmt.Errorf("%w: %s", ErrResourceNotFound, path), false
+		return nil, fmt.Errorf("%w: %s", ErrResourceNotFound, path), false
 
 	case http.StatusUnauthorized:
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -249,16 +324,16 @@ func (r *ResourceUIDResolver) doFetchResourceUID(ctx context.Context, reqURL, pa
 		if remaining > 0 {
 			r.logger.Debug("Received 401 from openchoreo-api; invalidating cached token and retrying",
 				"path", path, "attempt", attempt+1, "remaining_retries", remaining)
-			return "", nil, true
+			return nil, nil, true
 		}
 
 		r.logger.Error("Received 401 from openchoreo-api and retries are exhausted",
 			"path", path, "max_auth_retry", r.config.MaxAuthRetry)
-		return "", fmt.Errorf("%w: received 401 after %d attempt(s)", ErrScopeAuthFailed, r.config.MaxAuthRetry+1), false
+		return nil, fmt.Errorf("%w: received 401 after %d attempt(s)", ErrScopeAuthFailed, r.config.MaxAuthRetry+1), false
 
 	default:
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return "", fmt.Errorf("API returned status %d", resp.StatusCode), false
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode), false
 	}
 }
 

@@ -1328,7 +1328,9 @@ openchoreoApi:
                 - "workflowrun:view"
                 - "workflowrun:update"
 
-            # Observer service role for resolving resource UIDs
+            # Observer service role for resolving resource UIDs, and plane names to planeIDs
+            # for platform logs. Without the plane reads, a platform logs query for a named
+            # plane fails with a 403 from openchoreo-api rather than an obvious error.
             - name: observer-resource-reader
               system: true
               actions:
@@ -1336,6 +1338,12 @@ openchoreoApi:
                 - "project:view"
                 - "namespace:view"
                 - "environment:view"
+                - "dataplane:view"
+                - "clusterdataplane:view"
+                - "workflowplane:view"
+                - "clusterworkflowplane:view"
+                - "observabilityplane:view"
+                - "clusterobservabilityplane:view"
 
             # Admin role with full permissions to all resources
             - name: admin
@@ -1489,6 +1497,9 @@ openchoreoApi:
                 - "secretreference:view"
                 - "secretreference:update"
                 - "logs:view"
+                # Logs of OpenChoreo's own components. Operator-scoped and cluster-wide,
+                # unlike logs:view which is scoped to a project or component.
+                - "platformlogs:view"
                 - "events:view"
                 - "metrics:view"
                 - "traces:view"
@@ -1598,6 +1609,9 @@ openchoreoApi:
                 - "workload:update"
                 - "workload:delete"
                 - "logs:view"
+                # Logs of OpenChoreo's own components. Operator-scoped and cluster-wide,
+                # unlike logs:view which is scoped to a project or component.
+                - "platformlogs:view"
                 - "events:view"
                 - "metrics:view"
                 - "traces:view"

@@ -279,6 +279,9 @@ const (
 
 	// FinOps cost insights actions
 	ActionViewFinOps = "finops:view"
+
+	// Platform observability actions
+	ActionViewPlatformLogs = "platformlogs:view"
 )
 
 // Action represents a system action with metadata
@@ -546,6 +549,8 @@ var systemActions = []Action{
 
 	// FinOps cost insights
 	{Name: ActionViewFinOps, LowestScope: ScopeComponent, IsInternal: false},
+	// platform logs (logs of OpenChoreo's own components; operator-scoped, never per-project)
+	{Name: ActionViewPlatformLogs, LowestScope: ScopeCluster, IsInternal: false},
 }
 
 // AllActions returns all system-defined actions

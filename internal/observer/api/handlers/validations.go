@@ -23,6 +23,13 @@ const (
 	sortOrderAsc      = "asc"
 	maxQueryTimeRange = 30 * 24 * time.Hour // 30 days
 
+	// maxPlatformLogsFilterItems caps each repeated query parameter. A query string has length
+	// limits a request body would not, so the cap is enforced with a 400 rather than by truncating,
+	// which would silently return the wrong logs.
+	maxPlatformLogsFilterItems = 20
+	maxSearchPhraseLength      = 256
+	maxLabelSelectorLength     = 256
+
 	sourceTypeLog    = "log"
 	sourceTypeMetric = "metric"
 	sourceTypeBudget = "budget"
@@ -221,6 +228,90 @@ func ValidateAndSetSortOrder(sortOrder *string) error {
 	if *sortOrder != sortOrderAsc && *sortOrder != defaultSortOrder {
 		return fmt.Errorf("sortOrder must be either 'asc' or 'desc'")
 	}
+	return nil
+}
+
+// ValidatePlatformLogsQueryRequest validates the query parameters of
+// GET /api/v1alpha1/platform-logs.
+func ValidatePlatformLogsQueryRequest(req *types.PlatformLogsQueryRequest) error {
+	if req == nil {
+		return fmt.Errorf("request is required")
+	}
+
+	if err := validatePlaneScope(req); err != nil {
+		return err
+	}
+
+	if err := ValidateTimeRange(req.StartTime, req.EndTime); err != nil {
+		return err
+	}
+	if err := ValidateAndSetLimit(&req.Limit); err != nil {
+		return err
+	}
+	if err := ValidateAndSetSortOrder(&req.SortOrder); err != nil {
+		return err
+	}
+
+	for _, f := range []struct {
+		name   string
+		values []string
+	}{
+		{"namespace", req.Namespaces},
+		{"podName", req.PodNames},
+		{"containerName", req.ContainerNames},
+	} {
+		if len(f.values) > maxPlatformLogsFilterItems {
+			return fmt.Errorf("%s accepts at most %d values, got %d",
+				f.name, maxPlatformLogsFilterItems, len(f.values))
+		}
+	}
+
+	if len(req.SearchPhrase) > maxSearchPhraseLength {
+		return fmt.Errorf("searchPhrase cannot exceed %d characters", maxSearchPhraseLength)
+	}
+	if len(req.Labels) > maxLabelSelectorLength {
+		return fmt.Errorf("labels cannot exceed %d characters", maxLabelSelectorLength)
+	}
+
+	return nil
+}
+
+// validatePlaneScope checks that the plane coordinates are complete for the requested kind.
+func validatePlaneScope(req *types.PlatformLogsQueryRequest) error {
+	switch req.PlaneKind {
+	case "":
+		return fmt.Errorf("planeKind is required")
+	case types.PlaneKindControlPlane, types.PlaneKindDataPlane, types.PlaneKindClusterDataPlane,
+		types.PlaneKindWorkflowPlane, types.PlaneKindClusterWorkflowPlane,
+		types.PlaneKindObservabilityPlane, types.PlaneKindClusterObservabilityPlane,
+		types.PlaneKindOther:
+	default:
+		return fmt.Errorf("planeKind %q is not a valid plane kind", req.PlaneKind)
+	}
+
+	if !req.IsPlaneNameRequired() {
+		// The control plane is a singleton and Other is the absence of a plane, so naming one is a
+		// sign the caller expected a scope that does not exist. Reject rather than ignore.
+		if req.PlaneName != "" {
+			return fmt.Errorf("planeName is not applicable for planeKind %s", req.PlaneKind)
+		}
+		if req.PlaneNamespace != "" {
+			return fmt.Errorf("planeNamespace is not applicable for planeKind %s", req.PlaneKind)
+		}
+		return nil
+	}
+
+	if req.PlaneName == "" {
+		return fmt.Errorf("planeName is required for planeKind %s", req.PlaneKind)
+	}
+	if req.IsPlaneNamespaced() {
+		if req.PlaneNamespace == "" {
+			return fmt.Errorf("planeNamespace is required for planeKind %s", req.PlaneKind)
+		}
+	} else if req.PlaneNamespace != "" {
+		return fmt.Errorf("planeNamespace is not applicable for the cluster-scoped planeKind %s", req.PlaneKind)
+	}
+
 	return nil
 }
 

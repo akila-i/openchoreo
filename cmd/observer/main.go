@@ -116,6 +116,19 @@ func main() {
 	}
 	logger.Info("Tracing adapter initialized")
 
+	// Initialize the platform logs adapter client. It shares the logs adapter's base URL but a
+	// different path on the contract, since platform logs are a separate endpoint rather than a
+	// third variant of the workload search scope.
+	platformLogsAdapter, err := service.NewPlatformLogsAdapterClient(
+		cfg.Adapters.LogsAdapterURL,
+		cfg.Adapters.LogsAdapterTimeout,
+		logger.With("component", "platform-logs-adapter"),
+	)
+	if err != nil {
+		logger.Error("Failed to create platform logs adapter", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize authz client
 	authzClient, err := observerAuthz.NewClient(&cfg.Authz, logger.With("component", "authz-client"))
 	if err != nil {
@@ -227,6 +240,10 @@ func main() {
 		tracesService, authzClient, logger.With("component", "authz-traces"))
 	authzFinOpsService := service.NewFinOpsServiceWithAuthz(
 		finopsAdapter, authzClient, logger.With("component", "authz-finops"))
+	platformLogsService := service.NewPlatformLogsService(
+		platformLogsAdapter, uidResolver, logger.With("component", "platform-logs-service"))
+	authzPlatformLogsService := service.NewPlatformLogsServiceWithAuthz(
+		platformLogsService, authzClient, logger.With("component", "authz-platform-logs"))
 	authzAlertIncidentService := service.NewAlertIncidentServiceWithAuthz(
 		alertService, authzClient, logger.With("component", "authz-alerts-incidents"))
 
@@ -239,6 +256,7 @@ func main() {
 		authzAlertIncidentService,
 		authzTracesService,
 		authzFinOpsService,
+		authzPlatformLogsService,
 		logger.With("component", "api-handler"),
 	)
 
@@ -294,6 +312,9 @@ func main() {
 	api.HandleFunc(
 		"GET /api/v1alpha1/costs/namespaces/{namespace}/environments/{environment}/recommendations",
 		newAPIHandler.GetRecommendations)
+
+	// ===== New API Routes (v1alpha1) Platform (system component) logs =====
+	api.HandleFunc("GET /api/v1alpha1/platform-logs", newAPIHandler.GetPlatformLogs)
 
 	// Initialize new MCP handler backed by the authz-wrapped service layer
 	newMCPHandler, err := observermcp.NewMCPHandler(
