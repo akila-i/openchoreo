@@ -28,7 +28,7 @@ Sub-tasks [#4554](https://github.com/openchoreo/openchoreo/issues/4554),
 | WS | Issue | Status | Commit |
 |---|---|---|---|
 | WS1 — identity labels on plane pods | #4554 | **Done** | `d22d8428f` |
-| WS2 — `platformObservabilityPlaneRef` + CP discoverability | #4559 | Not started | |
+| WS2 — `platformObservabilityPlaneRef` + CP discoverability | #4559 | **Done** | `e08cb3c64` |
 | WS3 — observer + adapter contracts | #4556 / #4557 | Not started | |
 | WS4 — observer implementation + authz | #4556 | Not started | |
 | WS5 — `query_platform_logs` MCP tool | #4560 | Not started | |
@@ -280,6 +280,9 @@ same immutability failure this workstream exists to avoid. Verify before the PR 
 
 ### WS2 — `platformObservabilityPlaneRef` + control-plane discoverability (#4559)
 
+**Status: done** — commit `e08cb3c64`. See [As implemented](#ws2-as-implemented); item 5 turned out
+smaller than planned and the fallback rule below needed one correction.
+
 1. **CRD types** — add to all six specs in `api/v1alpha1/`:
    `dataplane_types.go`, `workflowplane_types.go`, `observabilityplane_types.go` get
    `PlatformObservabilityPlaneRef *ObservabilityPlaneRef`;
@@ -318,6 +321,33 @@ same immutability failure this workstream exists to avoid. Verify before the PR 
    `values.yaml` hardcodes `default`; changing the values default to empty so the release-name fallback
    actually fires is the smallest fix. **Treat as a separate PR** — it changes existing installs' plane
    identity.
+
+<a id="ws2-as-implemented"></a>
+#### As implemented
+
+1. **The fallback rule is wrong for observability planes.** `platformRef → observabilityPlaneRef →
+   "default"` is right for data and workflow planes, but an observability plane falling back to a
+   plane named `default` would fail on any install whose only observability plane is named something
+   else. `ObservabilityPlaneResult.GetPlatformObservabilityPlane` returns **the plane itself** when
+   no ref is set. A test asserts this with no `default` plane present, so a regression to the generic
+   chain fails loudly.
+2. **WS4 needs no new openchoreo-api endpoint.** The plan assumed plane→planeID resolution would
+   need one. It does not: all six plane GETs already exist and their `*PlaneSpec` schemas already
+   return `planeID`, so WS4's resolver is a new method against existing paths. Only the control-plane
+   metadata endpoint was genuinely new here.
+3. **The endpoint reports `enabled` as well as the ref**, so a client can tell "platform
+   observability is not configured" apart from "configured but returning nothing".
+4. **`make mockery-gen` is mandatory after any `openapi/openchoreo-api.yaml` change.** A new path
+   adds a method to the generated `ClientWithResponsesInterface`, which breaks
+   `internal/occ/resources/client/mocks/` — a package far from the change, caught only by
+   `make lint` (as a `typecheck` failure), not by `go build ./...`.
+5. **`values.schema.json` rejects `type` alongside `enum`.** The helm-schema tool fails with
+   "cannot use both 'enum' and 'type' in the same schema"; all 42 existing enums in that file omit
+   `type`, so the annotation must too.
+
+**Not done here, deliberately:** the `planeID`-uniqueness change (item 6 below). It alters the plane
+identity of existing installs, so it belongs in its own PR rather than riding along with an additive
+field.
 
 ---
 
@@ -533,6 +563,28 @@ Finally prove the upgrade path on a live install (install on k3d, then `make k3d
 that leaked into a selector fails there and nowhere earlier — and confirm the kgateway proxy pods
 picked the labels up:
 `kubectl get pod -n openchoreo-data-plane -l openchoreo.dev/plane=dataplane --show-labels`.
+
+**Plane ref and control-plane discoverability**
+
+```bash
+make manifests generate                       # CRDs + deepcopy
+make helm-generate.openchoreo-control-plane   # chart CRD copies + values.schema.json
+make openapi-codegen                          # API models/server/client
+make mockery-gen                              # occ client mock gains the new endpoint's method
+make lint && make go.test                     # go.test, not `go test ./...`, which lacks KUBEBUILDER_ASSETS
+```
+
+Then check the Helm chain renders, and that the schema rejects a bad kind:
+
+```bash
+helm template rel install/helm/openchoreo-control-plane -f test/e2e/k3d/values-cp.yaml \
+  --set platformObservability.observabilityPlaneRef.name=default \
+| yq 'select(.kind=="ConfigMap" and (.metadata.name|test("openchoreo-api-config"))) | .data["config.yaml"]' \
+| grep -A3 platform_observability
+
+helm template rel install/helm/openchoreo-control-plane -f test/e2e/k3d/values-cp.yaml \
+  --set platformObservability.observabilityPlaneRef.kind=Nonsense   # must fail schema validation
+```
 
 **Observer endpoint**
 
