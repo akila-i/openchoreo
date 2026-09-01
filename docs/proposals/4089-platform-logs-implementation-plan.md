@@ -10,7 +10,7 @@ _TBD_
 _2026-08-31_
 
 **Status**:
-_Submitted_
+_Implemented (openchoreo/openchoreo scope; see Progress)_
 
 **Related Issues/PRs**:
 Epic [#4089](https://github.com/openchoreo/openchoreo/issues/4089) ·
@@ -31,7 +31,7 @@ Sub-tasks [#4554](https://github.com/openchoreo/openchoreo/issues/4554),
 | WS2 — `platformObservabilityPlaneRef` + CP discoverability | #4559 | **Done** | `e08cb3c64` |
 | WS3 — observer + adapter contracts | #4556 / #4557 | **Done** | `33e95a55a` |
 | WS4 — observer implementation + authz | #4556 | **Done** | `7b76ca466` |
-| WS5 — `query_platform_logs` MCP tool | #4560 | Not started | |
+| WS5 — `query_platform_logs` MCP tool | #4560 | **Done** | `f6c9fad03` |
 
 ---
 
@@ -531,6 +531,13 @@ Capture `make lint`'s status directly, or a red lint reads as green.
 
 ### WS5 — `query_platform_logs` MCP tool (#4560)
 
+**Status: done** — commit `f6c9fad03`. Two notes: the tool description explicitly says what the tool
+is *not* and points at `query_component_logs`, because an agent selects on description alone and
+picking the wrong one of the two returns an empty result that reads as a healthy system; and the
+schema enum and the scope validator both read from one list of plane kinds so they cannot drift.
+The stale `allObserverTools` list in the tier3 e2e is fixed as part of this — it pinned 11 tools and
+had been missing `query_costs` / `query_recommendations` since `69f9093a9`.
+
 - `internal/observer/mcp/server.go` — tool 14 in `registerTools`, built with `createSchema` /
   `stringProperty` / `arrayProperty` / `limitLogsProperty` / `sortOrderProperty`; args as an anonymous
   struct with snake_case `json:` tags (`plane_kind`, `plane_name`, `plane_namespace`, `namespace`,
@@ -557,6 +564,29 @@ WS2 (discoverability)┴─→ WS3 (observer spec → adapter spec) ─→ WS4 (
 
 WS1 and WS2 are independent of each other and of the contracts, so they can go in parallel. WS3's two
 specs are strictly ordered. WS5 is blocked on WS4.
+
+---
+
+## What remains before this is usable end to end
+
+Every workstream in this repo is done, but platform logs do not flow yet: nothing collects them.
+The blocking work is all in `openchoreo/community-modules`, in this order:
+
+1. **501 stubs for `POST /api/v1alpha1/platform-logs/query`** in all five logs modules. Their
+   Makefiles fetch the adapter spec from `main`, and it drives a `strict-server` interface, so each
+   module fails to compile the next time it regenerates until the method exists.
+2. **The namespace-gated collection path** (#4555 and the Azure/GCP splits), plus the required
+   `clusterInstance` value on each collector — without it, two clusters running the default
+   `planeID` are indistinguishable.
+3. **Query implementations** behind those stubs (#4557).
+
+Note the OpenSearch module needs its index template changed as well as its collector config: the
+`container-logs-*` template is `"dynamic": false` with an OpenChoreo-label allowlist
+(`init/setup-opensearch.sh:60-142`), so platform pod labels are stored but not indexed. OpenObserve
+has a dynamic schema and is what `make/e2e.mk` already installs, so it is the cheaper first backend.
+
+Also still open from WS1: whether kgateway copies `spec.infrastructure.labels` onto the proxy
+Deployment's *selector*. That needs a cluster to answer and is the one unverified claim in this work.
 
 ---
 
