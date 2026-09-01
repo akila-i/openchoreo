@@ -27,18 +27,21 @@ type Config struct {
 	Logging LoggingConfig `koanf:"logging"`
 	// ClusterGateway defines cluster gateway connection settings.
 	ClusterGateway ClusterGatewayConfig `koanf:"cluster_gateway"`
+	// PlatformObservability points at the observability plane serving control-plane platform logs.
+	PlatformObservability PlatformObservabilityConfig `koanf:"platform_observability"`
 }
 
 // Defaults returns the default configuration.
 func Defaults() Config {
 	return Config{
-		Server:           ServerDefaults(),
-		Security:         SecurityDefaults(),
-		Identity:         IdentityDefaults(),
-		MCP:              MCPDefaults(),
-		SecretManagement: SecretManagementDefaults(),
-		Logging:          LoggingDefaults(),
-		ClusterGateway:   ClusterGatewayDefaults(),
+		Server:                ServerDefaults(),
+		Security:              SecurityDefaults(),
+		Identity:              IdentityDefaults(),
+		MCP:                   MCPDefaults(),
+		SecretManagement:      SecretManagementDefaults(),
+		Logging:               LoggingDefaults(),
+		ClusterGateway:        ClusterGatewayDefaults(),
+		PlatformObservability: PlatformObservabilityDefaults(),
 	}
 }
 
@@ -84,6 +87,7 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.MCP.ValidateMCPConfig(coreconfig.NewPath("mcp"))...)
 	errs = append(errs, c.Logging.Validate(coreconfig.NewPath("logging"))...)
 	errs = append(errs, c.ClusterGateway.Validate(coreconfig.NewPath("cluster_gateway"))...)
+	errs = append(errs, c.PlatformObservability.Validate(coreconfig.NewPath("platform_observability"))...)
 
 	return errs.OrNil()
 }

@@ -155,6 +155,35 @@ security:
 
 # @schema
 # type: object
+# description: >-
+#   Platform (system component) observability for the control plane. Every other plane carries this
+#   on its CR as spec.platformObservabilityPlaneRef, but the control plane has no CR, so the
+#   reference is supplied here and served over GET /api/v1/platform-observability.
+#   Setting it does not start collection - that is configured on the observability module.
+# @schema
+platformObservability:
+  # @schema
+  # type: object
+  # description: Reference to the observability plane serving control-plane platform logs.
+  # @schema
+  observabilityPlaneRef:
+    # @schema
+    # enum: [ObservabilityPlane, ClusterObservabilityPlane]
+    # description: Kind of the referenced observability plane.
+    # default: ClusterObservabilityPlane
+    # @schema
+    kind: ClusterObservabilityPlane
+    # @schema
+    # type: string
+    # description: >-
+    #   Name of the referenced observability plane. Empty means platform observability is not
+    #   configured for the control plane.
+    # default: ""
+    # @schema
+    name: ""
+
+# @schema
+# type: object
 # description: Feature flags shared across the control plane (API server and Backstage).
 # @schema
 features:

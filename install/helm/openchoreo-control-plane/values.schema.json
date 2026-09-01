@@ -4236,6 +4236,40 @@
       "title": "openchoreoApi",
       "type": "object"
     },
+    "platformObservability": {
+      "additionalProperties": false,
+      "description": "Platform (system component) observability for the control plane. Every other plane carries this on its CR as spec.platformObservabilityPlaneRef, but the control plane has no CR, so the reference is supplied here and served over GET /api/v1/platform-observability. Setting it does not start collection - that is configured on the observability module.",
+      "properties": {
+        "observabilityPlaneRef": {
+          "additionalProperties": false,
+          "description": "Reference to the observability plane serving control-plane platform logs.",
+          "properties": {
+            "kind": {
+              "default": "ClusterObservabilityPlane",
+              "description": "Kind of the referenced observability plane.",
+              "enum": [
+                "ObservabilityPlane",
+                "ClusterObservabilityPlane"
+              ],
+              "required": [],
+              "title": "kind"
+            },
+            "name": {
+              "default": "",
+              "description": "Name of the referenced observability plane. Empty means platform observability is not configured for the control plane.",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "observabilityPlaneRef",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "platformObservability",
+      "type": "object"
+    },
     "portalAssistant": {
       "additionalProperties": false,
       "description": "Optional Portal Assistant chat agent. Disabled by default; enable to opt in.",

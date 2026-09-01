@@ -125,6 +125,21 @@ type DataPlaneSpec struct {
 	// If not specified, defaults to an ObservabilityPlane named "default" in the same namespace.
 	// +optional
 	ObservabilityPlaneRef *ObservabilityPlaneRef `json:"observabilityPlaneRef,omitempty"`
+
+	// PlatformObservabilityPlaneRef specifies where this plane's own platform
+	// (system component) logs are published. It is deliberately separate from
+	// ObservabilityPlaneRef, which serves workload signals: an operator may want platform
+	// logs kept in one place, or in a specific region for compliance, while workload
+	// signals stay per-plane.
+	//
+	// Resolution order when not specified:
+	// - ObservabilityPlaneRef, if set on this DataPlane
+	// - an ObservabilityPlane named "default" in the same namespace
+	//
+	// Platform logs are opt-in: setting this does not by itself start collection, which is
+	// configured on the observability module.
+	// +optional
+	PlatformObservabilityPlaneRef *ObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 }
 
 // AgentConnectionStatus tracks the status of cluster agent connections

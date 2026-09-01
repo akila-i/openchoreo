@@ -11184,6 +11184,79 @@ func (_c *MockClientWithResponsesInterface_GetOpenAPISpecWithResponse_Call) RunA
 	return _c
 }
 
+// GetPlatformObservabilityWithResponse provides a mock function with given fields: ctx, reqEditors
+func (_m *MockClientWithResponsesInterface) GetPlatformObservabilityWithResponse(ctx context.Context, reqEditors ...gen.RequestEditorFn) (*gen.GetPlatformObservabilityResp, error) {
+	_va := make([]interface{}, len(reqEditors))
+	for _i := range reqEditors {
+		_va[_i] = reqEditors[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPlatformObservabilityWithResponse")
+	}
+
+	var r0 *gen.GetPlatformObservabilityResp
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...gen.RequestEditorFn) (*gen.GetPlatformObservabilityResp, error)); ok {
+		return rf(ctx, reqEditors...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...gen.RequestEditorFn) *gen.GetPlatformObservabilityResp); ok {
+		r0 = rf(ctx, reqEditors...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gen.GetPlatformObservabilityResp)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...gen.RequestEditorFn) error); ok {
+		r1 = rf(ctx, reqEditors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPlatformObservabilityWithResponse'
+type MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call struct {
+	*mock.Call
+}
+
+// GetPlatformObservabilityWithResponse is a helper method to define mock.On call
+//   - ctx context.Context
+//   - reqEditors ...gen.RequestEditorFn
+func (_e *MockClientWithResponsesInterface_Expecter) GetPlatformObservabilityWithResponse(ctx interface{}, reqEditors ...interface{}) *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call {
+	return &MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call{Call: _e.mock.On("GetPlatformObservabilityWithResponse",
+		append([]interface{}{ctx}, reqEditors...)...)}
+}
+
+func (_c *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call) Run(run func(ctx context.Context, reqEditors ...gen.RequestEditorFn)) *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]gen.RequestEditorFn, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(gen.RequestEditorFn)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call) Return(_a0 *gen.GetPlatformObservabilityResp, _a1 error) *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call) RunAndReturn(run func(context.Context, ...gen.RequestEditorFn) (*gen.GetPlatformObservabilityResp, error)) *MockClientWithResponsesInterface_GetPlatformObservabilityWithResponse_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetProjectReleaseBindingWithResponse provides a mock function with given fields: ctx, namespaceName, projectReleaseBindingName, reqEditors
 func (_m *MockClientWithResponsesInterface) GetProjectReleaseBindingWithResponse(ctx context.Context, namespaceName string, projectReleaseBindingName string, reqEditors ...gen.RequestEditorFn) (*gen.GetProjectReleaseBindingResp, error) {
 	_va := make([]interface{}, len(reqEditors))

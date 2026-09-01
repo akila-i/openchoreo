@@ -42,6 +42,20 @@ type ObservabilityPlaneSpec struct {
 	// FinOpsAgentURL is the base URL of the FinOps Agent API in the observability plane cluster
 	// +optional
 	FinOpsAgentURL string `json:"finOpsAgentURL,omitempty"`
+
+	// PlatformObservabilityPlaneRef specifies where this plane's own platform
+	// (system component) logs are published. It is deliberately separate from
+	// ObservabilityPlaneRef, which serves workload signals: an operator may want platform
+	// logs kept in one place, or in a specific region for compliance, while workload
+	// signals stay per-plane.
+	//
+	// When not specified, this plane serves its own platform logs - an observability plane is
+	// already a place logs can land, so there is nothing further to fall back to.
+	//
+	// Platform logs are opt-in: setting this does not by itself start collection, which is
+	// configured on the observability module.
+	// +optional
+	PlatformObservabilityPlaneRef *ObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 }
 
 // ObservabilityPlaneStatus defines the observed state of ObservabilityPlane.

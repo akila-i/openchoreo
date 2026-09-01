@@ -184,6 +184,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/OAuthProtectedResourceMetadata'
 
+  /api/v1/platform-observability:
+    get:
+      operationId: getPlatformObservability
+      summary: Get control plane platform observability configuration
+      description: |
+        Returns where the control plane's own platform (system component) logs are published.
+
+        Every other plane carries this on its CR as `spec.platformObservabilityPlaneRef`, but the
+        control plane has no CR of its own, so the value is supplied as a Helm configuration and
+        read back here. Clients use it to pick the observer to query for control-plane logs.
+
+        Requires authentication: it is operator-facing configuration, not public discovery
+        metadata like `/.well-known/oauth-protected-resource`.
+      tags: [Operations]
+      responses:
+        '200':
+          description: Platform observability configuration for the control plane
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformObservabilityResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   # =============================================================================
   # Namespace Endpoints
   # =============================================================================
@@ -7702,6 +7728,12 @@ components:
           $ref: '#/components/schemas/SecretStoreRef'
         observabilityPlaneRef:
           $ref: '#/components/schemas/ObservabilityPlaneRef'
+        platformObservabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ObservabilityPlaneRef'
+          description: |
+            Where this plane's own platform (system component) logs are published, as opposed to
+            the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
 
     DataPlaneStatus:
       type: object
@@ -7832,6 +7864,12 @@ components:
           $ref: '#/components/schemas/SecretStoreRef'
         observabilityPlaneRef:
           $ref: '#/components/schemas/ObservabilityPlaneRef'
+        platformObservabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ObservabilityPlaneRef'
+          description: |
+            Where this plane's own platform (system component) logs are published, as opposed to
+            the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
 
     WorkflowPlaneStatus:
       type: object
@@ -7937,6 +7975,33 @@ components:
           pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
           example: default
 
+    PlatformObservabilityResponse:
+      type: object
+      description: |
+        Where a plane's platform (system component) logs are published. Returned for the control
+        plane, which has no CR to carry the reference.
+      required:
+        - planeKind
+        - enabled
+      properties:
+        planeKind:
+          type: string
+          description: The plane this configuration describes. Always ControlPlane on this endpoint.
+          enum: [ControlPlane]
+          example: ControlPlane
+        enabled:
+          type: boolean
+          description: |
+            Whether an observability plane reference is configured. False means the control plane's
+            platform logs have no configured destination, so clients should not offer the view.
+          example: true
+        observabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ObservabilityPlaneRef'
+          description: |
+            The observability plane serving control-plane platform logs. Absent when enabled is
+            false.
+
     # -------------------------------------------------------------------------
     # ObservabilityPlanes
     # -------------------------------------------------------------------------
@@ -8005,6 +8070,12 @@ components:
           type: string
           description: Base URL of the FinOps Agent API in the observability plane cluster
           example: http://finops-agent.observability-plane.svc:8080
+        platformObservabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ObservabilityPlaneRef'
+          description: |
+            Where this plane's own platform (system component) logs are published, as opposed to
+            the workload signals of the components running on it. Defaults to this plane itself.
 
     ObservabilityPlaneStatus:
       type: object
@@ -8084,6 +8155,12 @@ components:
           $ref: '#/components/schemas/SecretStoreRef'
         observabilityPlaneRef:
           $ref: '#/components/schemas/ClusterObservabilityPlaneRef'
+        platformObservabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ClusterObservabilityPlaneRef'
+          description: |
+            Where this plane's own platform (system component) logs are published, as opposed to
+            the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
 
     ClusterDataPlaneStatus:
       type: object
@@ -8161,6 +8238,12 @@ components:
           $ref: '#/components/schemas/SecretStoreRef'
         observabilityPlaneRef:
           $ref: '#/components/schemas/ClusterObservabilityPlaneRef'
+        platformObservabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ClusterObservabilityPlaneRef'
+          description: |
+            Where this plane's own platform (system component) logs are published, as opposed to
+            the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
 
     ClusterWorkflowPlaneStatus:
       type: object
@@ -8269,6 +8352,12 @@ components:
           type: string
           description: Base URL of the FinOps Agent API in the observability plane cluster
           example: http://finops-agent.observability-plane.svc:8080
+        platformObservabilityPlaneRef:
+          allOf:
+            - $ref: '#/components/schemas/ClusterObservabilityPlaneRef'
+          description: |
+            Where this plane's own platform (system component) logs are published, as opposed to
+            the workload signals of the components running on it. Defaults to this plane itself.
 
     ClusterObservabilityPlaneStatus:
       type: object

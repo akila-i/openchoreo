@@ -78,6 +78,11 @@ data:
         {{- end }}
         insecure: {{ .Values.openchoreoApi.clusterGateway.tls.insecure }}
 
+    platform_observability:
+      observability_plane_ref:
+        kind: {{ .Values.platformObservability.observabilityPlaneRef.kind | quote }}
+        name: {{ .Values.platformObservability.observabilityPlaneRef.name | quote }}
+
     logging:
       {{- toYaml .Values.openchoreoApi.config.logging | nindent 6 }}
 {{- end }}

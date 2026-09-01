@@ -831,6 +831,9 @@ type ClientInterface interface {
 
 	UpdateWorkload(ctx context.Context, namespaceName NamespaceNameParam, workloadName WorkloadNameParam, body UpdateWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetPlatformObservability request
+	GetPlatformObservability(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// HandleAutoBuildWithBody request with any body
 	HandleAutoBuildWithBody(ctx context.Context, params *HandleAutoBuildParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4124,6 +4127,18 @@ func (c *Client) UpdateWorkloadWithBody(ctx context.Context, namespaceName Names
 
 func (c *Client) UpdateWorkload(ctx context.Context, namespaceName NamespaceNameParam, workloadName WorkloadNameParam, body UpdateWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateWorkloadRequest(c.Server, namespaceName, workloadName, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPlatformObservability(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPlatformObservabilityRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -14821,6 +14836,33 @@ func NewUpdateWorkloadRequestWithBody(server string, namespaceName NamespaceName
 	return req, nil
 }
 
+// NewGetPlatformObservabilityRequest generates requests for GetPlatformObservability
+func NewGetPlatformObservabilityRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/platform-observability")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewHandleAutoBuildRequest calls the generic HandleAutoBuild builder with application/json body
 func NewHandleAutoBuildRequest(server string, params *HandleAutoBuildParams, body HandleAutoBuildJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -16219,6 +16261,9 @@ type ClientWithResponsesInterface interface {
 	UpdateWorkloadWithBodyWithResponse(ctx context.Context, namespaceName NamespaceNameParam, workloadName WorkloadNameParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateWorkloadResp, error)
 
 	UpdateWorkloadWithResponse(ctx context.Context, namespaceName NamespaceNameParam, workloadName WorkloadNameParam, body UpdateWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateWorkloadResp, error)
+
+	// GetPlatformObservabilityWithResponse request
+	GetPlatformObservabilityWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPlatformObservabilityResp, error)
 
 	// HandleAutoBuildWithBodyWithResponse request with any body
 	HandleAutoBuildWithBodyWithResponse(ctx context.Context, params *HandleAutoBuildParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*HandleAutoBuildResp, error)
@@ -21587,6 +21632,30 @@ func (r UpdateWorkloadResp) StatusCode() int {
 	return 0
 }
 
+type GetPlatformObservabilityResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PlatformObservabilityResponse
+	JSON401      *Unauthorized
+	JSON500      *InternalError
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPlatformObservabilityResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPlatformObservabilityResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type HandleAutoBuildResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -24310,6 +24379,15 @@ func (c *ClientWithResponses) UpdateWorkloadWithResponse(ctx context.Context, na
 		return nil, err
 	}
 	return ParseUpdateWorkloadResp(rsp)
+}
+
+// GetPlatformObservabilityWithResponse request returning *GetPlatformObservabilityResp
+func (c *ClientWithResponses) GetPlatformObservabilityWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPlatformObservabilityResp, error) {
+	rsp, err := c.GetPlatformObservability(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPlatformObservabilityResp(rsp)
 }
 
 // HandleAutoBuildWithBodyWithResponse request with arbitrary body returning *HandleAutoBuildResp
@@ -36069,6 +36147,46 @@ func ParseUpdateWorkloadResp(rsp *http.Response) (*UpdateWorkloadResp, error) {
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPlatformObservabilityResp parses an HTTP response from a GetPlatformObservabilityWithResponse call
+func ParseGetPlatformObservabilityResp(rsp *http.Response) (*GetPlatformObservabilityResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPlatformObservabilityResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PlatformObservabilityResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalError

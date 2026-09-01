@@ -240,6 +240,11 @@ const (
 	ObservabilityPlaneRefKindObservabilityPlane        ObservabilityPlaneRefKind = "ObservabilityPlane"
 )
 
+// Defines values for PlatformObservabilityResponsePlaneKind.
+const (
+	ControlPlane PlatformObservabilityResponsePlaneKind = "ControlPlane"
+)
+
 // Defines values for PostRenderValidationTargetPlane.
 const (
 	PostRenderValidationTargetPlaneDataplane          PostRenderValidationTargetPlane = "dataplane"
@@ -943,6 +948,10 @@ type ClusterDataPlaneSpec struct {
 	// Multiple ClusterDataPlane CRs can share the same planeID.
 	PlaneID *string `json:"planeID,omitempty"`
 
+	// PlatformObservabilityPlaneRef Where this plane's own platform (system component) logs are published, as opposed to
+	// the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
+	PlatformObservabilityPlaneRef *ClusterObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
+
 	// SecretStoreRef Reference to an External Secrets Operator ClusterSecretStore
 	SecretStoreRef *SecretStoreRef `json:"secretStoreRef,omitempty"`
 }
@@ -1012,6 +1021,10 @@ type ClusterObservabilityPlaneSpec struct {
 	// PlaneID Logical plane identifier for the physical cluster.
 	// Multiple ClusterObservabilityPlane CRs can share the same planeID.
 	PlaneID *string `json:"planeID,omitempty"`
+
+	// PlatformObservabilityPlaneRef Where this plane's own platform (system component) logs are published, as opposed to
+	// the workload signals of the components running on it. Defaults to this plane itself.
+	PlatformObservabilityPlaneRef *ClusterObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 
 	// RcaAgentURL Base URL of the RCA Agent API in the observability plane cluster
 	RcaAgentURL *string `json:"rcaAgentURL,omitempty"`
@@ -1281,6 +1294,10 @@ type ClusterWorkflowPlaneSpec struct {
 	// PlaneID Logical plane identifier for the physical cluster.
 	// Multiple ClusterWorkflowPlane CRs can share the same planeID.
 	PlaneID *string `json:"planeID,omitempty"`
+
+	// PlatformObservabilityPlaneRef Where this plane's own platform (system component) logs are published, as opposed to
+	// the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
+	PlatformObservabilityPlaneRef *ClusterObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 
 	// SecretStoreRef Reference to an External Secrets Operator ClusterSecretStore
 	SecretStoreRef *SecretStoreRef `json:"secretStoreRef,omitempty"`
@@ -1856,6 +1873,10 @@ type DataPlaneSpec struct {
 	// PlaneID Logical plane identifier for the physical cluster.
 	// Multiple DataPlane CRs can share the same planeID.
 	PlaneID *string `json:"planeID,omitempty"`
+
+	// PlatformObservabilityPlaneRef Where this plane's own platform (system component) logs are published, as opposed to
+	// the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
+	PlatformObservabilityPlaneRef *ObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 
 	// SecretStoreRef Reference to an External Secrets Operator ClusterSecretStore
 	SecretStoreRef *SecretStoreRef `json:"secretStoreRef,omitempty"`
@@ -2550,6 +2571,10 @@ type ObservabilityPlaneSpec struct {
 	// Multiple ObservabilityPlane CRs can share the same planeID.
 	PlaneID *string `json:"planeID,omitempty"`
 
+	// PlatformObservabilityPlaneRef Where this plane's own platform (system component) logs are published, as opposed to
+	// the workload signals of the components running on it. Defaults to this plane itself.
+	PlatformObservabilityPlaneRef *ObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
+
 	// RcaAgentURL Base URL of the RCA Agent API in the observability plane cluster
 	RcaAgentURL *string `json:"rcaAgentURL,omitempty"`
 }
@@ -2649,6 +2674,24 @@ type PendingConnection struct {
 	// Reason Describes why the connection could not be resolved
 	Reason string `json:"reason"`
 }
+
+// PlatformObservabilityResponse Where a plane's platform (system component) logs are published. Returned for the control
+// plane, which has no CR to carry the reference.
+type PlatformObservabilityResponse struct {
+	// Enabled Whether an observability plane reference is configured. False means the control plane's
+	// platform logs have no configured destination, so clients should not offer the view.
+	Enabled bool `json:"enabled"`
+
+	// ObservabilityPlaneRef The observability plane serving control-plane platform logs. Absent when enabled is
+	// false.
+	ObservabilityPlaneRef *ObservabilityPlaneRef `json:"observabilityPlaneRef,omitempty"`
+
+	// PlaneKind The plane this configuration describes. Always ControlPlane on this endpoint.
+	PlaneKind PlatformObservabilityResponsePlaneKind `json:"planeKind"`
+}
+
+// PlatformObservabilityResponsePlaneKind The plane this configuration describes. Always ControlPlane on this endpoint.
+type PlatformObservabilityResponsePlaneKind string
 
 // PodLogEntry A single log entry from a pod
 type PodLogEntry struct {
@@ -4193,6 +4236,10 @@ type WorkflowPlaneSpec struct {
 	// PlaneID Logical plane identifier for the physical cluster.
 	// Multiple WorkflowPlane CRs can share the same planeID.
 	PlaneID *string `json:"planeID,omitempty"`
+
+	// PlatformObservabilityPlaneRef Where this plane's own platform (system component) logs are published, as opposed to
+	// the workload signals of the components running on it. Defaults to observabilityPlaneRef, then to the "default" plane.
+	PlatformObservabilityPlaneRef *ObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 
 	// SecretStoreRef Reference to an External Secrets Operator ClusterSecretStore
 	SecretStoreRef *SecretStoreRef `json:"secretStoreRef,omitempty"`

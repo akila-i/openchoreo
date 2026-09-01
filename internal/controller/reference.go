@@ -64,6 +64,7 @@ func (r *DataPlaneResult) ToDataPlane() *openchoreov1alpha1.DataPlane {
 				Name: r.ClusterDataPlane.Spec.ObservabilityPlaneRef.Name,
 			}
 		}
+		platformObsRef := clusterObsRefToObsRef(r.ClusterDataPlane.Spec.PlatformObservabilityPlaneRef)
 		return &openchoreov1alpha1.DataPlane{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: r.ClusterDataPlane.Name,
@@ -74,11 +75,12 @@ func (r *DataPlaneResult) ToDataPlane() *openchoreov1alpha1.DataPlane {
 				Annotations: r.ClusterDataPlane.Annotations,
 			},
 			Spec: openchoreov1alpha1.DataPlaneSpec{
-				PlaneID:               r.ClusterDataPlane.Spec.PlaneID,
-				ClusterAgent:          r.ClusterDataPlane.Spec.ClusterAgent,
-				Gateway:               r.ClusterDataPlane.Spec.Gateway,
-				SecretStoreRef:        r.ClusterDataPlane.Spec.SecretStoreRef,
-				ObservabilityPlaneRef: obsRef,
+				PlaneID:                       r.ClusterDataPlane.Spec.PlaneID,
+				ClusterAgent:                  r.ClusterDataPlane.Spec.ClusterAgent,
+				Gateway:                       r.ClusterDataPlane.Spec.Gateway,
+				SecretStoreRef:                r.ClusterDataPlane.Spec.SecretStoreRef,
+				ObservabilityPlaneRef:         obsRef,
+				PlatformObservabilityPlaneRef: platformObsRef,
 			},
 		}
 	}
@@ -107,6 +109,21 @@ func (r *DataPlaneResult) GetObservabilityPlane(ctx context.Context, c client.Cl
 	}
 	if r.ClusterDataPlane != nil {
 		return GetObservabilityPlaneFromRef(ctx, c, "", clusterObsRefToObsRef(r.ClusterDataPlane.Spec.ObservabilityPlaneRef))
+	}
+	return nil, fmt.Errorf("no data plane set in result")
+}
+
+// GetPlatformObservabilityPlane resolves the observability plane that serves this data plane's own
+// platform (system component) logs.
+func (r *DataPlaneResult) GetPlatformObservabilityPlane(ctx context.Context, c client.Client) (*ObservabilityPlaneResult, error) {
+	if r.DataPlane != nil {
+		return GetPlatformObservabilityPlaneFromRef(ctx, c, r.DataPlane.Namespace,
+			r.DataPlane.Spec.PlatformObservabilityPlaneRef, r.DataPlane.Spec.ObservabilityPlaneRef)
+	}
+	if r.ClusterDataPlane != nil {
+		return GetPlatformObservabilityPlaneFromRef(ctx, c, "",
+			clusterObsRefToObsRef(r.ClusterDataPlane.Spec.PlatformObservabilityPlaneRef),
+			clusterObsRefToObsRef(r.ClusterDataPlane.Spec.ObservabilityPlaneRef))
 	}
 	return nil, fmt.Errorf("no data plane set in result")
 }
@@ -319,6 +336,46 @@ func getDefaultObservabilityPlane(ctx context.Context, c client.Client, namespac
 		fmt.Sprintf("no ObservabilityPlaneRef specified and default ClusterObservabilityPlane '%s' not found", DefaultPlaneName))
 }
 
+// GetPlatformObservabilityPlaneFromRef resolves the observability plane that serves a plane's own
+// platform (system component) logs, as opposed to the workload signals of the components running on
+// it.
+//
+// Resolution order: platformRef, then obsRef, then the default resolution in
+// getDefaultObservabilityPlane. Falling back to obsRef means a fresh install needs no new
+// configuration - platform logs land wherever workload signals already go - while an operator who
+// needs them elsewhere, for cost or data-residency reasons, sets platformRef explicitly.
+func GetPlatformObservabilityPlaneFromRef(
+	ctx context.Context,
+	c client.Client,
+	namespace string,
+	platformRef *openchoreov1alpha1.ObservabilityPlaneRef,
+	obsRef *openchoreov1alpha1.ObservabilityPlaneRef,
+) (*ObservabilityPlaneResult, error) {
+	if platformRef != nil {
+		return GetObservabilityPlaneFromRef(ctx, c, namespace, platformRef)
+	}
+	return GetObservabilityPlaneFromRef(ctx, c, namespace, obsRef)
+}
+
+// GetPlatformObservabilityPlane resolves the observability plane that serves this observability
+// plane's own platform logs. With no ref set it is this plane itself: an observability plane is
+// already a place logs can land, so there is nothing further to fall back to.
+func (r *ObservabilityPlaneResult) GetPlatformObservabilityPlane(ctx context.Context, c client.Client) (*ObservabilityPlaneResult, error) {
+	if r.ObservabilityPlane != nil {
+		if ref := r.ObservabilityPlane.Spec.PlatformObservabilityPlaneRef; ref != nil {
+			return GetObservabilityPlaneFromRef(ctx, c, r.ObservabilityPlane.Namespace, ref)
+		}
+		return r, nil
+	}
+	if r.ClusterObservabilityPlane != nil {
+		if ref := r.ClusterObservabilityPlane.Spec.PlatformObservabilityPlaneRef; ref != nil {
+			return GetObservabilityPlaneFromRef(ctx, c, "", clusterObsRefToObsRef(ref))
+		}
+		return r, nil
+	}
+	return nil, fmt.Errorf("no observability plane set in result")
+}
+
 // clusterObsRefToObsRef converts a ClusterObservabilityPlaneRef to an ObservabilityPlaneRef.
 // Returns nil if the input is nil, preserving the "no ref specified" semantics.
 func clusterObsRefToObsRef(ref *openchoreov1alpha1.ClusterObservabilityPlaneRef) *openchoreov1alpha1.ObservabilityPlaneRef {
@@ -394,6 +451,21 @@ func (r *WorkflowPlaneResult) GetObservabilityPlane(ctx context.Context, c clien
 	}
 	if r.ClusterWorkflowPlane != nil {
 		return GetObservabilityPlaneFromRef(ctx, c, "", clusterObsRefToObsRef(r.ClusterWorkflowPlane.Spec.ObservabilityPlaneRef))
+	}
+	return nil, fmt.Errorf("no workflow plane set in result")
+}
+
+// GetPlatformObservabilityPlane resolves the observability plane that serves this workflow plane's
+// own platform (system component) logs.
+func (r *WorkflowPlaneResult) GetPlatformObservabilityPlane(ctx context.Context, c client.Client) (*ObservabilityPlaneResult, error) {
+	if r.WorkflowPlane != nil {
+		return GetPlatformObservabilityPlaneFromRef(ctx, c, r.WorkflowPlane.Namespace,
+			r.WorkflowPlane.Spec.PlatformObservabilityPlaneRef, r.WorkflowPlane.Spec.ObservabilityPlaneRef)
+	}
+	if r.ClusterWorkflowPlane != nil {
+		return GetPlatformObservabilityPlaneFromRef(ctx, c, "",
+			clusterObsRefToObsRef(r.ClusterWorkflowPlane.Spec.PlatformObservabilityPlaneRef),
+			clusterObsRefToObsRef(r.ClusterWorkflowPlane.Spec.ObservabilityPlaneRef))
 	}
 	return nil, fmt.Errorf("no workflow plane set in result")
 }

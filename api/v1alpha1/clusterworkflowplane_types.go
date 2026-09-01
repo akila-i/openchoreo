@@ -43,6 +43,25 @@ type ClusterWorkflowPlaneSpec struct {
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="!has(self.kind) || self.kind == 'ClusterObservabilityPlane'",message="ClusterWorkflowPlane can only reference ClusterObservabilityPlane"
 	ObservabilityPlaneRef *ClusterObservabilityPlaneRef `json:"observabilityPlaneRef,omitempty"`
+
+	// PlatformObservabilityPlaneRef specifies where this plane's own platform
+	// (system component) logs are published. It is deliberately separate from
+	// ObservabilityPlaneRef, which serves workload signals: an operator may want platform
+	// logs kept in one place, or in a specific region for compliance, while workload
+	// signals stay per-plane.
+	//
+	// Resolution order when not specified:
+	// - ObservabilityPlaneRef, if set on this ClusterWorkflowPlane
+	// - a ClusterObservabilityPlane named "default"
+	//
+	// Platform logs are opt-in: setting this does not by itself start collection, which is
+	// configured on the observability module.
+	//
+	// Since this is a cluster-scoped resource, it can only reference cluster-scoped
+	// ClusterObservabilityPlane. The kind field must be "ClusterObservabilityPlane".
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!has(self.kind) || self.kind == 'ClusterObservabilityPlane'",message="ClusterWorkflowPlane can only reference ClusterObservabilityPlane"
+	PlatformObservabilityPlaneRef *ClusterObservabilityPlaneRef `json:"platformObservabilityPlaneRef,omitempty"`
 }
 
 // ClusterWorkflowPlaneStatus defines the observed state of ClusterWorkflowPlane.
