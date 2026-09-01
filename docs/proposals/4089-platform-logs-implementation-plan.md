@@ -30,7 +30,7 @@ Sub-tasks [#4554](https://github.com/openchoreo/openchoreo/issues/4554),
 | WS1 — identity labels on plane pods | #4554 | **Done** | `d22d8428f` |
 | WS2 — `platformObservabilityPlaneRef` + CP discoverability | #4559 | **Done** | `e08cb3c64` |
 | WS3 — observer + adapter contracts | #4556 / #4557 | **Done** | `33e95a55a` |
-| WS4 — observer implementation + authz | #4556 | Not started | |
+| WS4 — observer implementation + authz | #4556 | **Done** | `7b76ca466` |
 | WS5 — `query_platform_logs` MCP tool | #4560 | Not started | |
 
 ---
@@ -450,6 +450,8 @@ Response `PlatformLogsResponse` — same shape as the observer's.
 
 ### WS4 — Observer implementation + authorization (#4556)
 
+**Status: done** — commit `7b76ca466`. See [As implemented](#ws4-as-implemented).
+
 The footprint mirrors `0d6c4cb73`. Note the observer does **not** use the generated server — routes are
 hand-registered in `cmd/observer/main.go` and logs use hand-written types in `internal/observer/types/`
 — so follow that, not `server.gen.go`.
@@ -498,6 +500,32 @@ hand-registered in `cmd/observer/main.go` and logs use hand-written types in `in
      the `observer-resource-reader` role at `:1303-1309` — without these, planeID resolution 403s
 
 No new observer config: the endpoint reuses `LOGS_ADAPTER_URL` / `UID_RESOLVER_*`.
+
+<a id="ws4-as-implemented"></a>
+#### As implemented
+
+1. **The resolver refactor was load-bearing, not cosmetic.** `fetchResourceUID` decoded
+   `metadata.uid` *inside* the retry loop, so plane resolution could not reuse the OAuth, retry and
+   401-invalidation machinery without duplicating it. It is now `fetchResource` returning the raw
+   body, with `fetchResourceUID` and `GetPlaneID` as thin decoders over it. No behaviour change for
+   existing callers.
+2. **`GetPlaneID` falls back to the CR name when `spec.planeID` is empty**, mirroring the charts'
+   `planeID | default .Release.Name`. Without it, a plane installed with no explicit planeID
+   resolves to `""` and the query silently matches nothing — the worst kind of failure here, since
+   an empty log view looks identical to a healthy quiet plane.
+3. **Naming a plane on `ControlPlane` or `Other` is a 400, not ignored.** Ignoring it would return
+   control-plane logs to a caller who asked for something else.
+4. **The authz shape is pinned by a self-explaining test.**
+   `TestPlatformLogsAuthz_UsesClusterScopeWithEmptyHierarchy` asserts the hierarchy stays empty,
+   because the Casbin PDP decides on `Resource.Hierarchy` — a plane name there would imply
+   per-plane enforcement the data cannot back. That test is where the decision is recorded if
+   someone later wants real per-plane ABAC.
+5. **Both role grants landed**: `platformlogs:view` on `sre` and `platform-engineer` (`admin`
+   already has `*`; deliberately not `developer`, which is tenant-scoped, nor `rca-agent`, which
+   does workload RCA), and the six plane view actions on `observer-resource-reader`.
+
+**Verification gotcha:** `make lint 2>&1 | tail -n` swallows the exit code — `$?` is `tail`'s.
+Capture `make lint`'s status directly, or a red lint reads as green.
 
 ---
 
