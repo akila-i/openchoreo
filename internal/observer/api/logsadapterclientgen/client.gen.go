@@ -95,6 +95,28 @@ const (
 	LogsQueryRequestSortOrderDesc LogsQueryRequestSortOrder = "desc"
 )
 
+// Defines values for PlatformLogPlaneKind.
+const (
+	PlatformLogPlaneKindControlplane       PlatformLogPlaneKind = "controlplane"
+	PlatformLogPlaneKindDataplane          PlatformLogPlaneKind = "dataplane"
+	PlatformLogPlaneKindObservabilityplane PlatformLogPlaneKind = "observabilityplane"
+	PlatformLogPlaneKindWorkflowplane      PlatformLogPlaneKind = "workflowplane"
+)
+
+// Defines values for PlatformLogsQueryRequestSortOrder.
+const (
+	Asc  PlatformLogsQueryRequestSortOrder = "asc"
+	Desc PlatformLogsQueryRequestSortOrder = "desc"
+)
+
+// Defines values for PlatformSearchScopePlane.
+const (
+	PlatformSearchScopePlaneControlplane       PlatformSearchScopePlane = "controlplane"
+	PlatformSearchScopePlaneDataplane          PlatformSearchScopePlane = "dataplane"
+	PlatformSearchScopePlaneObservabilityplane PlatformSearchScopePlane = "observabilityplane"
+	PlatformSearchScopePlaneWorkflowplane      PlatformSearchScopePlane = "workflowplane"
+)
+
 // AlertRuleRequest defines model for AlertRuleRequest.
 type AlertRuleRequest struct {
 	Condition struct {
@@ -427,6 +449,98 @@ type LogsQueryResponse_Logs struct {
 	union json.RawMessage
 }
 
+// PlatformLog defines model for PlatformLog.
+type PlatformLog struct {
+	ClusterInstance *string `json:"clusterInstance,omitempty"`
+	ContainerName   *string `json:"containerName,omitempty"`
+
+	// Level Log severity, derived from the message text where the backend does not supply one.
+	Level *string `json:"level,omitempty"`
+
+	// Log The log message.
+	Log           *string               `json:"log,omitempty"`
+	NamespaceName *string               `json:"namespaceName,omitempty"`
+	PlaneId       *string               `json:"planeId,omitempty"`
+	PlaneKind     *PlatformLogPlaneKind `json:"planeKind,omitempty"`
+	PodName       *string               `json:"podName,omitempty"`
+
+	// Timestamp Timestamp of the log entry in UTC.
+	Timestamp *time.Time `json:"timestamp,omitempty"`
+}
+
+// PlatformLogPlaneKind defines model for PlatformLog.PlaneKind.
+type PlatformLogPlaneKind string
+
+// PlatformLogsQueryRequest defines model for PlatformLogsQueryRequest.
+type PlatformLogsQueryRequest struct {
+	// EndTime Exclusive upper bound of the log window.
+	EndTime time.Time `json:"endTime"`
+
+	// Labels Kubernetes label selector applied to the pod labels on each record.
+	Labels *string `json:"labels,omitempty"`
+
+	// Limit The maximum number of entries to return.
+	Limit *int `json:"limit,omitempty"`
+
+	// Scope Physical scope of a platform log query. The observer has already resolved the
+	// selected plane CR to its planeID, so this carries installation identity rather than
+	// CR names - several CRs sharing a planeID correctly resolve to the same filter.
+	Scope PlatformSearchScope `json:"scope"`
+
+	// SearchPhrase Text to search for within log messages.
+	SearchPhrase *string                            `json:"searchPhrase,omitempty"`
+	SortOrder    *PlatformLogsQueryRequestSortOrder `json:"sortOrder,omitempty"`
+
+	// StartTime Inclusive lower bound of the log window.
+	StartTime time.Time `json:"startTime"`
+}
+
+// PlatformLogsQueryRequestSortOrder defines model for PlatformLogsQueryRequest.SortOrder.
+type PlatformLogsQueryRequestSortOrder string
+
+// PlatformLogsResponse defines model for PlatformLogsResponse.
+type PlatformLogsResponse struct {
+	Logs []PlatformLog `json:"logs"`
+
+	// TookMs The time taken to query the logs in milliseconds.
+	TookMs int64 `json:"tookMs"`
+
+	// Total The total number of matching log entries, capped at 1000.
+	Total int64 `json:"total"`
+}
+
+// PlatformSearchScope Physical scope of a platform log query. The observer has already resolved the
+// selected plane CR to its planeID, so this carries installation identity rather than
+// CR names - several CRs sharing a planeID correctly resolve to the same filter.
+type PlatformSearchScope struct {
+	// ClusterInstance Cluster the records were collected from, stamped by the collector.
+	ClusterInstance *string   `json:"clusterInstance,omitempty"`
+	ContainerNames  *[]string `json:"containerNames,omitempty"`
+
+	// Namespaces Kubernetes namespaces of the platform pods.
+	Namespaces *[]string `json:"namespaces,omitempty"`
+
+	// Plane Plane attribution as carried on the `openchoreo.dev/plane` pod label. The
+	// cluster-scoped and namespace-scoped CR kinds collapse to the same value here.
+	// Omitted when `unattributed` is true.
+	Plane *PlatformSearchScopePlane `json:"plane,omitempty"`
+
+	// PlaneId The plane's planeID, from the `openchoreo.dev/plane-id` pod label. Not sent for
+	// the control plane, which is a singleton.
+	PlaneId  *string   `json:"planeId,omitempty"`
+	PodNames *[]string `json:"podNames,omitempty"`
+
+	// Unattributed When true, match only records carrying no `openchoreo.dev/plane` label -
+	// components OpenChoreo depends on but does not ship. Mutually exclusive with
+	// `plane`.
+	Unattributed *bool `json:"unattributed,omitempty"`
+}
+
+// PlatformSearchScopePlane Plane attribution as carried on the `openchoreo.dev/plane` pod label. The
+// cluster-scoped and namespace-scoped CR kinds collapse to the same value here.
+// Omitted when `unattributed` is true.
+type PlatformSearchScopePlane string
+
 // WorkflowLogEntry defines model for WorkflowLogEntry.
 type WorkflowLogEntry struct {
 	// Log The log message
@@ -462,6 +576,9 @@ type UpdateAlertRuleJSONRequestBody = AlertRuleRequest
 
 // HandleAlertWebhookJSONRequestBody defines body for HandleAlertWebhook for application/json ContentType.
 type HandleAlertWebhookJSONRequestBody = HandleAlertWebhookJSONBody
+
+// QueryPlatformLogsJSONRequestBody defines body for QueryPlatformLogs for application/json ContentType.
+type QueryPlatformLogsJSONRequestBody = PlatformLogsQueryRequest
 
 // AsComponentSearchScope returns the union data inside the EventsQueryRequest_SearchScope as a ComponentSearchScope
 func (t EventsQueryRequest_SearchScope) AsComponentSearchScope() (ComponentSearchScope, error) {
@@ -753,6 +870,11 @@ type ClientInterface interface {
 
 	HandleAlertWebhook(ctx context.Context, body HandleAlertWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// QueryPlatformLogsWithBody request with any body
+	QueryPlatformLogsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	QueryPlatformLogs(ctx context.Context, body QueryPlatformLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// Health request
 	Health(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
@@ -891,6 +1013,30 @@ func (c *Client) HandleAlertWebhookWithBody(ctx context.Context, contentType str
 
 func (c *Client) HandleAlertWebhook(ctx context.Context, body HandleAlertWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewHandleAlertWebhookRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) QueryPlatformLogsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewQueryPlatformLogsRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) QueryPlatformLogs(ctx context.Context, body QueryPlatformLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewQueryPlatformLogsRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1188,6 +1334,46 @@ func NewHandleAlertWebhookRequestWithBody(server string, contentType string, bod
 	return req, nil
 }
 
+// NewQueryPlatformLogsRequest calls the generic QueryPlatformLogs builder with application/json body
+func NewQueryPlatformLogsRequest(server string, body QueryPlatformLogsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewQueryPlatformLogsRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewQueryPlatformLogsRequestWithBody generates requests for QueryPlatformLogs with any type of body
+func NewQueryPlatformLogsRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1alpha1/platform-logs/query")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewHealthRequest generates requests for Health
 func NewHealthRequest(server string) (*http.Request, error) {
 	var err error
@@ -1288,6 +1474,11 @@ type ClientWithResponsesInterface interface {
 	HandleAlertWebhookWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*HandleAlertWebhookResp, error)
 
 	HandleAlertWebhookWithResponse(ctx context.Context, body HandleAlertWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*HandleAlertWebhookResp, error)
+
+	// QueryPlatformLogsWithBodyWithResponse request with any body
+	QueryPlatformLogsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QueryPlatformLogsResp, error)
+
+	QueryPlatformLogsWithResponse(ctx context.Context, body QueryPlatformLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*QueryPlatformLogsResp, error)
 
 	// HealthWithResponse request
 	HealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*HealthResp, error)
@@ -1470,6 +1661,31 @@ func (r HandleAlertWebhookResp) StatusCode() int {
 	return 0
 }
 
+type QueryPlatformLogsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PlatformLogsResponse
+	JSON400      *ErrorResponse
+	JSON401      *ErrorResponse
+	JSON500      *ErrorResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r QueryPlatformLogsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r QueryPlatformLogsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type HealthResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1599,6 +1815,23 @@ func (c *ClientWithResponses) HandleAlertWebhookWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseHandleAlertWebhookResp(rsp)
+}
+
+// QueryPlatformLogsWithBodyWithResponse request with arbitrary body returning *QueryPlatformLogsResp
+func (c *ClientWithResponses) QueryPlatformLogsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QueryPlatformLogsResp, error) {
+	rsp, err := c.QueryPlatformLogsWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQueryPlatformLogsResp(rsp)
+}
+
+func (c *ClientWithResponses) QueryPlatformLogsWithResponse(ctx context.Context, body QueryPlatformLogsJSONRequestBody, reqEditors ...RequestEditorFn) (*QueryPlatformLogsResp, error) {
+	rsp, err := c.QueryPlatformLogs(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQueryPlatformLogsResp(rsp)
 }
 
 // HealthWithResponse request returning *HealthResp
@@ -1940,6 +2173,53 @@ func ParseHandleAlertWebhookResp(rsp *http.Response) (*HandleAlertWebhookResp, e
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseQueryPlatformLogsResp parses an HTTP response from a QueryPlatformLogsWithResponse call
+func ParseQueryPlatformLogsResp(rsp *http.Response) (*QueryPlatformLogsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &QueryPlatformLogsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PlatformLogsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest ErrorResponse

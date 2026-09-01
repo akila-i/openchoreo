@@ -118,6 +118,69 @@ paths:
                 errorCode: "OBS-V1-L-29"
                 message: ""
 
+  # Platform (system component) logs query endpoint
+  /api/v1alpha1/platform-logs/query:
+    post:
+      tags:
+        - Logs
+      summary: Query platform (system component) logs
+      description: |
+        Query logs produced by OpenChoreo's own components rather than by user workloads.
+
+        This is a separate path rather than a third variant of `searchScope` on
+        `/api/v1/logs/query`. That union is discriminated by the presence of
+        `workflowRunName`, so a third member would need a new discriminator in every
+        adapter; and the scope here is physical rather than logical - the observer has
+        already resolved the plane CR to its planeID before calling.
+
+        Which records are reachable at all is decided upstream, by the namespace allowlist
+        configured on the collector. An adapter must not treat the plane labels as an
+        authorization boundary: they are set by whoever installs the chart.
+      operationId: queryPlatformLogs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlatformLogsQueryRequest"
+      responses:
+        "200":
+          description: Platform logs queried successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformLogsResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                title: "badRequest"
+                errorCode: ""
+                message: "Missing required fields 'startTime' and 'endTime'"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                title: "unauthorized"
+                errorCode: ""
+                message: "Invalid or missing token"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                title: "internalServerError"
+                errorCode: "OBS-V1-PL-29"
+                message: ""
+
   /api/v1/events/query:
     post:
       tags:
@@ -517,6 +580,149 @@ components:
         tookMs:
           type: integer
           description: The time taken to query the logs in milliseconds
+
+    # Platform (system component) log schemas
+    PlatformSearchScope:
+      type: object
+      description: |
+        Physical scope of a platform log query. The observer has already resolved the
+        selected plane CR to its planeID, so this carries installation identity rather than
+        CR names - several CRs sharing a planeID correctly resolve to the same filter.
+      properties:
+        plane:
+          type: string
+          description: |
+            Plane attribution as carried on the `openchoreo.dev/plane` pod label. The
+            cluster-scoped and namespace-scoped CR kinds collapse to the same value here.
+            Omitted when `unattributed` is true.
+          enum:
+            - controlplane
+            - dataplane
+            - workflowplane
+            - observabilityplane
+        unattributed:
+          type: boolean
+          default: false
+          description: |
+            When true, match only records carrying no `openchoreo.dev/plane` label -
+            components OpenChoreo depends on but does not ship. Mutually exclusive with
+            `plane`.
+        planeId:
+          type: string
+          description: |
+            The plane's planeID, from the `openchoreo.dev/plane-id` pod label. Not sent for
+            the control plane, which is a singleton.
+        clusterInstance:
+          type: string
+          description: Cluster the records were collected from, stamped by the collector.
+        namespaces:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+          description: Kubernetes namespaces of the platform pods.
+        podNames:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+        containerNames:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+
+    PlatformLogsQueryRequest:
+      type: object
+      required:
+        - startTime
+        - endTime
+        - scope
+      properties:
+        startTime:
+          type: string
+          format: date-time
+          description: Inclusive lower bound of the log window.
+        endTime:
+          type: string
+          format: date-time
+          description: Exclusive upper bound of the log window.
+        scope:
+          $ref: "#/components/schemas/PlatformSearchScope"
+        limit:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 1000
+          description: The maximum number of entries to return.
+        sortOrder:
+          type: string
+          enum: [asc, desc]
+          default: desc
+        labels:
+          type: string
+          maxLength: 256
+          description: Kubernetes label selector applied to the pod labels on each record.
+        searchPhrase:
+          type: string
+          maxLength: 256
+          description: Text to search for within log messages.
+
+    PlatformLog:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the log entry in UTC.
+        log:
+          type: string
+          description: The log message.
+        level:
+          type: string
+          description: Log severity, derived from the message text where the backend does not supply one.
+        planeKind:
+          type: string
+          enum:
+            - controlplane
+            - dataplane
+            - workflowplane
+            - observabilityplane
+        planeId:
+          type: string
+        clusterInstance:
+          type: string
+        namespaceName:
+          type: string
+        podName:
+          type: string
+        containerName:
+          type: string
+
+    PlatformLogsResponse:
+      type: object
+      required:
+        - tookMs
+        - total
+        - logs
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformLog"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The total number of matching log entries, capped at 1000.
+        tookMs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The time taken to query the logs in milliseconds.
 
     # Request schema for events
     EventsQueryRequest:

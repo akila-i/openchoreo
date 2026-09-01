@@ -177,6 +177,14 @@ const (
 	MetricsQueryRequestMetricResource MetricsQueryRequestMetric = "resource"
 )
 
+// Defines values for PlatformLogPlaneKind.
+const (
+	Controlplane       PlatformLogPlaneKind = "controlplane"
+	Dataplane          PlatformLogPlaneKind = "dataplane"
+	Observabilityplane PlatformLogPlaneKind = "observabilityplane"
+	Workflowplane      PlatformLogPlaneKind = "workflowplane"
+)
+
 // Defines values for RuntimeTopologyEdgeProtocol.
 const (
 	RuntimeTopologyEdgeProtocolHttp RuntimeTopologyEdgeProtocol = "http"
@@ -205,8 +213,44 @@ const (
 
 // Defines values for TracesQueryRequestSortOrder.
 const (
-	Asc  TracesQueryRequestSortOrder = "asc"
-	Desc TracesQueryRequestSortOrder = "desc"
+	TracesQueryRequestSortOrderAsc  TracesQueryRequestSortOrder = "asc"
+	TracesQueryRequestSortOrderDesc TracesQueryRequestSortOrder = "desc"
+)
+
+// Defines values for PlatformLogsPlaneKind.
+const (
+	PlatformLogsPlaneKindClusterDataPlane          PlatformLogsPlaneKind = "ClusterDataPlane"
+	PlatformLogsPlaneKindClusterObservabilityPlane PlatformLogsPlaneKind = "ClusterObservabilityPlane"
+	PlatformLogsPlaneKindClusterWorkflowPlane      PlatformLogsPlaneKind = "ClusterWorkflowPlane"
+	PlatformLogsPlaneKindControlPlane              PlatformLogsPlaneKind = "ControlPlane"
+	PlatformLogsPlaneKindDataPlane                 PlatformLogsPlaneKind = "DataPlane"
+	PlatformLogsPlaneKindObservabilityPlane        PlatformLogsPlaneKind = "ObservabilityPlane"
+	PlatformLogsPlaneKindOther                     PlatformLogsPlaneKind = "Other"
+	PlatformLogsPlaneKindWorkflowPlane             PlatformLogsPlaneKind = "WorkflowPlane"
+)
+
+// Defines values for PlatformLogsSortOrder.
+const (
+	PlatformLogsSortOrderAsc  PlatformLogsSortOrder = "asc"
+	PlatformLogsSortOrderDesc PlatformLogsSortOrder = "desc"
+)
+
+// Defines values for GetPlatformLogsParamsPlaneKind.
+const (
+	GetPlatformLogsParamsPlaneKindClusterDataPlane          GetPlatformLogsParamsPlaneKind = "ClusterDataPlane"
+	GetPlatformLogsParamsPlaneKindClusterObservabilityPlane GetPlatformLogsParamsPlaneKind = "ClusterObservabilityPlane"
+	GetPlatformLogsParamsPlaneKindClusterWorkflowPlane      GetPlatformLogsParamsPlaneKind = "ClusterWorkflowPlane"
+	GetPlatformLogsParamsPlaneKindControlPlane              GetPlatformLogsParamsPlaneKind = "ControlPlane"
+	GetPlatformLogsParamsPlaneKindDataPlane                 GetPlatformLogsParamsPlaneKind = "DataPlane"
+	GetPlatformLogsParamsPlaneKindObservabilityPlane        GetPlatformLogsParamsPlaneKind = "ObservabilityPlane"
+	GetPlatformLogsParamsPlaneKindOther                     GetPlatformLogsParamsPlaneKind = "Other"
+	GetPlatformLogsParamsPlaneKindWorkflowPlane             GetPlatformLogsParamsPlaneKind = "WorkflowPlane"
+)
+
+// Defines values for GetPlatformLogsParamsSortOrder.
+const (
+	Asc  GetPlatformLogsParamsSortOrder = "asc"
+	Desc GetPlatformLogsParamsSortOrder = "desc"
 )
 
 // AlertRuleRequest defines model for AlertRuleRequest.
@@ -966,6 +1010,54 @@ type MetricsTimeSeriesItem struct {
 	Value *float64 `json:"value,omitempty"`
 }
 
+// PlatformLog A single platform log entry.
+type PlatformLog struct {
+	// ClusterInstance Cluster the record was collected from, stamped by the logs collector.
+	ClusterInstance *string `json:"clusterInstance,omitempty"`
+	ContainerName   *string `json:"containerName,omitempty"`
+
+	// Level Log severity, derived from the message text by the adapter. Absent when the
+	// adapter cannot determine one.
+	Level *string `json:"level,omitempty"`
+
+	// Log The log message. Named `log` rather than `message` to match ComponentLogEntry
+	// and WorkflowLogEntry.
+	Log *string `json:"log,omitempty"`
+
+	// NamespaceName Kubernetes namespace of the pod that produced the log.
+	NamespaceName *string `json:"namespaceName,omitempty"`
+
+	// PlaneId The plane's planeID. Absent on control-plane records, which are a singleton, and
+	// on records with no plane attribution.
+	PlaneId *string `json:"planeId,omitempty"`
+
+	// PlaneKind Plane attribution as carried on the pod label, which collapses the
+	// cluster-scoped and namespace-scoped CR kinds into one physical kind. Absent for
+	// records with no plane attribution.
+	PlaneKind *PlatformLogPlaneKind `json:"planeKind,omitempty"`
+	PodName   *string               `json:"podName,omitempty"`
+
+	// Timestamp Timestamp of the log entry in UTC.
+	Timestamp *time.Time `json:"timestamp,omitempty"`
+}
+
+// PlatformLogPlaneKind Plane attribution as carried on the pod label, which collapses the
+// cluster-scoped and namespace-scoped CR kinds into one physical kind. Absent for
+// records with no plane attribution.
+type PlatformLogPlaneKind string
+
+// PlatformLogsResponse defines model for PlatformLogsResponse.
+type PlatformLogsResponse struct {
+	// Logs Log entries matching the query.
+	Logs []PlatformLog `json:"logs"`
+
+	// TookMs The time taken to query the logs in milliseconds.
+	TookMs int64 `json:"tookMs"`
+
+	// Total The total number of matching log entries, capped at 1000.
+	Total int64 `json:"total"`
+}
+
 // RecommendationResponse defines model for RecommendationResponse.
 type RecommendationResponse struct {
 	// Items One recommendation per component in scope. A single element when
@@ -1342,6 +1434,45 @@ type FinOpsProject = string
 // FinOpsStartTime defines model for FinOpsStartTime.
 type FinOpsStartTime = time.Time
 
+// PlatformLogsClusterInstance defines model for PlatformLogsClusterInstance.
+type PlatformLogsClusterInstance = string
+
+// PlatformLogsContainerName defines model for PlatformLogsContainerName.
+type PlatformLogsContainerName = []string
+
+// PlatformLogsEndTime defines model for PlatformLogsEndTime.
+type PlatformLogsEndTime = time.Time
+
+// PlatformLogsLabels defines model for PlatformLogsLabels.
+type PlatformLogsLabels = string
+
+// PlatformLogsLimit defines model for PlatformLogsLimit.
+type PlatformLogsLimit = int
+
+// PlatformLogsNamespace defines model for PlatformLogsNamespace.
+type PlatformLogsNamespace = []string
+
+// PlatformLogsPlaneKind defines model for PlatformLogsPlaneKind.
+type PlatformLogsPlaneKind string
+
+// PlatformLogsPlaneName defines model for PlatformLogsPlaneName.
+type PlatformLogsPlaneName = string
+
+// PlatformLogsPlaneNamespace defines model for PlatformLogsPlaneNamespace.
+type PlatformLogsPlaneNamespace = string
+
+// PlatformLogsPodName defines model for PlatformLogsPodName.
+type PlatformLogsPodName = []string
+
+// PlatformLogsSearchPhrase defines model for PlatformLogsSearchPhrase.
+type PlatformLogsSearchPhrase = string
+
+// PlatformLogsSortOrder defines model for PlatformLogsSortOrder.
+type PlatformLogsSortOrder string
+
+// PlatformLogsStartTime defines model for PlatformLogsStartTime.
+type PlatformLogsStartTime = time.Time
+
 // GetComponentCostsParams defines parameters for GetComponentCosts.
 type GetComponentCostsParams struct {
 	// Project Project name. When set, narrows the response to components in this project.
@@ -1376,6 +1507,67 @@ type GetRecommendationsParams struct {
 	// EndTime Exclusive upper bound of the cost window (RFC 3339). Must be strictly greater than startTime.
 	EndTime FinOpsEndTime `form:"endTime" json:"endTime"`
 }
+
+// GetPlatformLogsParams defines parameters for GetPlatformLogs.
+type GetPlatformLogsParams struct {
+	// PlaneKind Kind of plane to return logs for. The cluster-scoped and namespace-scoped variants
+	// are listed separately because they identify different CRs, even though both resolve
+	// to the same physical plane attribution. `Other` selects records with no plane
+	// attribution - components OpenChoreo depends on but does not ship, such as
+	// cert-manager or external-secrets.
+	PlaneKind GetPlatformLogsParamsPlaneKind `form:"planeKind" json:"planeKind"`
+
+	// PlaneName Name of the plane CR. Required for every `planeKind` except `ControlPlane`, which is
+	// a singleton with no CR, and `Other`, which has no plane. Resolved to the CR's
+	// `spec.planeID` before querying.
+	PlaneName *PlatformLogsPlaneName `form:"planeName,omitempty" json:"planeName,omitempty"`
+
+	// PlaneNamespace Namespace of the plane CR. Required for the namespace-scoped kinds (`DataPlane`,
+	// `WorkflowPlane`, `ObservabilityPlane`). This is the namespace the CR lives in, not
+	// the namespace of the pods whose logs are returned - see `namespace`.
+	PlaneNamespace *PlatformLogsPlaneNamespace `form:"planeNamespace,omitempty" json:"planeNamespace,omitempty"`
+
+	// ClusterInstance Cluster the records were collected from, as configured on the logs collector. For
+	// `planeKind=Other` this is the only scope available, since those components carry no
+	// plane attribution and the same namespace name exists on several clusters.
+	ClusterInstance *PlatformLogsClusterInstance `form:"clusterInstance,omitempty" json:"clusterInstance,omitempty"`
+
+	// Namespace Kubernetes namespace of the platform pod. Repeat for several. Not to be confused
+	// with `planeNamespace`.
+	Namespace *PlatformLogsNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// PodName Pod name to filter by. Repeat for several.
+	PodName *PlatformLogsPodName `form:"podName,omitempty" json:"podName,omitempty"`
+
+	// ContainerName Container name to filter by. Repeat for several.
+	ContainerName *PlatformLogsContainerName `form:"containerName,omitempty" json:"containerName,omitempty"`
+
+	// StartTime Inclusive lower bound of the log window (RFC 3339, absolute UTC).
+	StartTime PlatformLogsStartTime `form:"startTime" json:"startTime"`
+
+	// EndTime Exclusive upper bound of the log window (RFC 3339, absolute UTC). Must be strictly greater than startTime.
+	EndTime PlatformLogsEndTime `form:"endTime" json:"endTime"`
+
+	// Limit Maximum number of log entries to return.
+	Limit *PlatformLogsLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// SortOrder Sort direction on the log timestamp.
+	SortOrder *GetPlatformLogsParamsSortOrder `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
+
+	// Labels Kubernetes label selector applied to the pod labels on each record, for example
+	// `app.kubernetes.io/component=controller-manager`.
+	Labels *PlatformLogsLabels `form:"labels,omitempty" json:"labels,omitempty"`
+
+	// SearchPhrase Text to search for within log messages. Entries not containing the phrase are
+	// excluded. Capped because a query string has length limits a request body would not.
+	SearchPhrase *PlatformLogsSearchPhrase `form:"searchPhrase,omitempty" json:"searchPhrase,omitempty"`
+}
+
+// GetPlatformLogsParamsPlaneKind defines parameters for GetPlatformLogs.
+type GetPlatformLogsParamsPlaneKind string
+
+// GetPlatformLogsParamsSortOrder defines parameters for GetPlatformLogs.
+type GetPlatformLogsParamsSortOrder string
 
 // QueryEventsJSONRequestBody defines body for QueryEvents for application/json ContentType.
 type QueryEventsJSONRequestBody = EventsQueryRequest

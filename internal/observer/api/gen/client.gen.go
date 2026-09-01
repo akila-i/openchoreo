@@ -151,6 +151,9 @@ type ClientInterface interface {
 
 	QueryRuntimeTopology(ctx context.Context, body QueryRuntimeTopologyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetPlatformLogs request
+	GetPlatformLogs(ctx context.Context, params *GetPlatformLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// QueryTracesWithBody request with any body
 	QueryTracesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -446,6 +449,18 @@ func (c *Client) QueryRuntimeTopologyWithBody(ctx context.Context, contentType s
 
 func (c *Client) QueryRuntimeTopology(ctx context.Context, body QueryRuntimeTopologyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewQueryRuntimeTopologyRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetPlatformLogs(ctx context.Context, params *GetPlatformLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPlatformLogsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1260,6 +1275,235 @@ func NewQueryRuntimeTopologyRequestWithBody(server string, contentType string, b
 	return req, nil
 }
 
+// NewGetPlatformLogsRequest generates requests for GetPlatformLogs
+func NewGetPlatformLogsRequest(server string, params *GetPlatformLogsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1alpha1/platform-logs")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "planeKind", runtime.ParamLocationQuery, params.PlaneKind); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if params.PlaneName != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "planeName", runtime.ParamLocationQuery, *params.PlaneName); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.PlaneNamespace != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "planeNamespace", runtime.ParamLocationQuery, *params.PlaneNamespace); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ClusterInstance != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "clusterInstance", runtime.ParamLocationQuery, *params.ClusterInstance); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Namespace != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "namespace", runtime.ParamLocationQuery, *params.Namespace); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.PodName != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "podName", runtime.ParamLocationQuery, *params.PodName); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ContainerName != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "containerName", runtime.ParamLocationQuery, *params.ContainerName); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "startTime", runtime.ParamLocationQuery, params.StartTime); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "endTime", runtime.ParamLocationQuery, params.EndTime); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.SortOrder != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "sortOrder", runtime.ParamLocationQuery, *params.SortOrder); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Labels != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "labels", runtime.ParamLocationQuery, *params.Labels); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.SearchPhrase != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "searchPhrase", runtime.ParamLocationQuery, *params.SearchPhrase); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewQueryTracesRequest calls the generic QueryTraces builder with application/json body
 func NewQueryTracesRequest(server string, body QueryTracesJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -1519,6 +1763,9 @@ type ClientWithResponsesInterface interface {
 	QueryRuntimeTopologyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QueryRuntimeTopologyResp, error)
 
 	QueryRuntimeTopologyWithResponse(ctx context.Context, body QueryRuntimeTopologyJSONRequestBody, reqEditors ...RequestEditorFn) (*QueryRuntimeTopologyResp, error)
+
+	// GetPlatformLogsWithResponse request
+	GetPlatformLogsWithResponse(ctx context.Context, params *GetPlatformLogsParams, reqEditors ...RequestEditorFn) (*GetPlatformLogsResp, error)
 
 	// QueryTracesWithBodyWithResponse request with any body
 	QueryTracesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QueryTracesResp, error)
@@ -1898,6 +2145,32 @@ func (r QueryRuntimeTopologyResp) StatusCode() int {
 	return 0
 }
 
+type GetPlatformLogsResp struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *PlatformLogsResponse
+	JSON400      *ErrorResponse
+	JSON401      *ErrorResponse
+	JSON403      *ErrorResponse
+	JSON500      *ErrorResponse
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPlatformLogsResp) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPlatformLogsResp) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type QueryTracesResp struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -2208,6 +2481,15 @@ func (c *ClientWithResponses) QueryRuntimeTopologyWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseQueryRuntimeTopologyResp(rsp)
+}
+
+// GetPlatformLogsWithResponse request returning *GetPlatformLogsResp
+func (c *ClientWithResponses) GetPlatformLogsWithResponse(ctx context.Context, params *GetPlatformLogsParams, reqEditors ...RequestEditorFn) (*GetPlatformLogsResp, error) {
+	rsp, err := c.GetPlatformLogs(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPlatformLogsResp(rsp)
 }
 
 // QueryTracesWithBodyWithResponse request with arbitrary body returning *QueryTracesResp
@@ -2959,6 +3241,60 @@ func ParseQueryRuntimeTopologyResp(rsp *http.Response) (*QueryRuntimeTopologyRes
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest RuntimeTopologyResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPlatformLogsResp parses an HTTP response from a GetPlatformLogsWithResponse call
+func ParseGetPlatformLogsResp(rsp *http.Response) (*GetPlatformLogsResp, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPlatformLogsResp{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PlatformLogsResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

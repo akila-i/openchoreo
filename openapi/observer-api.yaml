@@ -360,6 +360,83 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # Runtime topology endpoint (for cell diagram with runtime observability)
+  # Platform (system component) logs endpoint
+  /api/v1alpha1/platform-logs:
+    get:
+      tags:
+        - Logs
+      summary: Query platform (system component) logs
+      description: |
+        Returns logs produced by OpenChoreo's own components - the control-plane
+        controller-manager, openchoreo-api and cluster-gateway, the per-plane cluster
+        agents, the observability-plane observer and agents, and the gateway proxies.
+
+        This is deliberately shaped differently from `POST /api/v1/logs/query`. Platform
+        scope is a fixed set of Kubernetes coordinates, so there is nothing for a `oneOf`
+        to discriminate between, and a GET gives the portal a URL that *is* the query -
+        shareable, cacheable, and the basis of permalink and deep-link behaviour. The
+        existing component and workflow search scopes are unaffected.
+
+        Scope resolution: `planeKind` selects the plane type, and for every kind except
+        `ControlPlane` and `Other`, `planeName` (plus `planeNamespace` for the three
+        namespace-scoped kinds) identifies the CR. The observer resolves that CR to its
+        `spec.planeID` and filters on it, so several CRs sharing a planeID correctly
+        return the same logs. `Other` selects records carrying no plane attribution -
+        components OpenChoreo depends on but does not ship.
+
+        Note `namespace` here is the Kubernetes namespace of the platform pod, which is
+        not the same thing as `planeNamespace`, the namespace of the plane CR.
+
+        Requires the `platformlogs:view` permission. What reaches this API is bounded by
+        the namespace allowlist configured on the observability module, so user workload
+        namespaces (`dp-*`, `workflow-*`) are not reachable here regardless of pod labels.
+      operationId: getPlatformLogs
+      parameters:
+        - $ref: "#/components/parameters/PlatformLogsPlaneKind"
+        - $ref: "#/components/parameters/PlatformLogsPlaneName"
+        - $ref: "#/components/parameters/PlatformLogsPlaneNamespace"
+        - $ref: "#/components/parameters/PlatformLogsClusterInstance"
+        - $ref: "#/components/parameters/PlatformLogsNamespace"
+        - $ref: "#/components/parameters/PlatformLogsPodName"
+        - $ref: "#/components/parameters/PlatformLogsContainerName"
+        - $ref: "#/components/parameters/PlatformLogsStartTime"
+        - $ref: "#/components/parameters/PlatformLogsEndTime"
+        - $ref: "#/components/parameters/PlatformLogsLimit"
+        - $ref: "#/components/parameters/PlatformLogsSortOrder"
+        - $ref: "#/components/parameters/PlatformLogsLabels"
+        - $ref: "#/components/parameters/PlatformLogsSearchPhrase"
+      responses:
+        "200":
+          description: Platform logs retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformLogsResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1alpha1/metrics/runtime-topology:
     post:
       tags:
@@ -970,6 +1047,164 @@ components:
         type: string
         pattern: '^[1-9][0-9]*[hdw]$'
         example: 1d
+    PlatformLogsPlaneKind:
+      name: planeKind
+      in: query
+      required: true
+      description: |
+        Kind of plane to return logs for. The cluster-scoped and namespace-scoped variants
+        are listed separately because they identify different CRs, even though both resolve
+        to the same physical plane attribution. `Other` selects records with no plane
+        attribution - components OpenChoreo depends on but does not ship, such as
+        cert-manager or external-secrets.
+      schema:
+        type: string
+        enum:
+          - ControlPlane
+          - DataPlane
+          - ClusterDataPlane
+          - WorkflowPlane
+          - ClusterWorkflowPlane
+          - ObservabilityPlane
+          - ClusterObservabilityPlane
+          - Other
+        example: ControlPlane
+    PlatformLogsPlaneName:
+      name: planeName
+      in: query
+      required: false
+      description: |
+        Name of the plane CR. Required for every `planeKind` except `ControlPlane`, which is
+        a singleton with no CR, and `Other`, which has no plane. Resolved to the CR's
+        `spec.planeID` before querying.
+      schema:
+        type: string
+        maxLength: 63
+        example: prod-dp
+    PlatformLogsPlaneNamespace:
+      name: planeNamespace
+      in: query
+      required: false
+      description: |
+        Namespace of the plane CR. Required for the namespace-scoped kinds (`DataPlane`,
+        `WorkflowPlane`, `ObservabilityPlane`). This is the namespace the CR lives in, not
+        the namespace of the pods whose logs are returned - see `namespace`.
+      schema:
+        type: string
+        maxLength: 63
+        example: default
+    PlatformLogsClusterInstance:
+      name: clusterInstance
+      in: query
+      required: false
+      description: |
+        Cluster the records were collected from, as configured on the logs collector. For
+        `planeKind=Other` this is the only scope available, since those components carry no
+        plane attribution and the same namespace name exists on several clusters.
+      schema:
+        type: string
+        maxLength: 253
+        example: cluster1
+    PlatformLogsNamespace:
+      name: namespace
+      in: query
+      required: false
+      description: |
+        Kubernetes namespace of the platform pod. Repeat for several. Not to be confused
+        with `planeNamespace`.
+      schema:
+        type: array
+        maxItems: 20
+        uniqueItems: true
+        items:
+          type: string
+          maxLength: 253
+      example: ["openchoreo-control-plane"]
+    PlatformLogsPodName:
+      name: podName
+      in: query
+      required: false
+      description: Pod name to filter by. Repeat for several.
+      schema:
+        type: array
+        maxItems: 20
+        uniqueItems: true
+        items:
+          type: string
+          maxLength: 253
+      example: ["controller-manager-7f58b689b5-pwsb5"]
+    PlatformLogsContainerName:
+      name: containerName
+      in: query
+      required: false
+      description: Container name to filter by. Repeat for several.
+      schema:
+        type: array
+        maxItems: 20
+        uniqueItems: true
+        items:
+          type: string
+          maxLength: 253
+      example: ["manager"]
+    PlatformLogsStartTime:
+      name: startTime
+      in: query
+      required: true
+      description: Inclusive lower bound of the log window (RFC 3339, absolute UTC).
+      schema:
+        type: string
+        format: date-time
+        example: "2026-08-14T16:30:00Z"
+    PlatformLogsEndTime:
+      name: endTime
+      in: query
+      required: true
+      description: Exclusive upper bound of the log window (RFC 3339, absolute UTC). Must be strictly greater than startTime.
+      schema:
+        type: string
+        format: date-time
+        example: "2026-08-14T17:30:00Z"
+    PlatformLogsLimit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of log entries to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    PlatformLogsSortOrder:
+      name: sortOrder
+      in: query
+      required: false
+      description: Sort direction on the log timestamp.
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+    PlatformLogsLabels:
+      name: labels
+      in: query
+      required: false
+      description: |
+        Kubernetes label selector applied to the pod labels on each record, for example
+        `app.kubernetes.io/component=controller-manager`.
+      schema:
+        type: string
+        maxLength: 256
+        example: app.kubernetes.io/component=controller-manager
+    PlatformLogsSearchPhrase:
+      name: searchPhrase
+      in: query
+      required: false
+      description: |
+        Text to search for within log messages. Entries not containing the phrase are
+        excluded. Capped because a query string has length limits a request body would not.
+      schema:
+        type: string
+        maxLength: 256
+        example: reconcile failed
 
   schemas:
     # Request schemas for logs
@@ -1116,6 +1351,75 @@ components:
         tookMs:
           type: integer
           description: The time taken to query the logs in milliseconds
+
+    # Platform (system component) log schemas
+    PlatformLog:
+      type: object
+      description: A single platform log entry.
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the log entry in UTC.
+        log:
+          type: string
+          description: |
+            The log message. Named `log` rather than `message` to match ComponentLogEntry
+            and WorkflowLogEntry.
+        level:
+          type: string
+          description: |
+            Log severity, derived from the message text by the adapter. Absent when the
+            adapter cannot determine one.
+        planeKind:
+          type: string
+          description: |
+            Plane attribution as carried on the pod label, which collapses the
+            cluster-scoped and namespace-scoped CR kinds into one physical kind. Absent for
+            records with no plane attribution.
+          enum:
+            - controlplane
+            - dataplane
+            - workflowplane
+            - observabilityplane
+        planeId:
+          type: string
+          description: |
+            The plane's planeID. Absent on control-plane records, which are a singleton, and
+            on records with no plane attribution.
+        clusterInstance:
+          type: string
+          description: Cluster the record was collected from, stamped by the logs collector.
+        namespaceName:
+          type: string
+          description: Kubernetes namespace of the pod that produced the log.
+        podName:
+          type: string
+        containerName:
+          type: string
+
+    PlatformLogsResponse:
+      type: object
+      required:
+        - tookMs
+        - total
+        - logs
+      properties:
+        logs:
+          type: array
+          description: Log entries matching the query.
+          items:
+            $ref: "#/components/schemas/PlatformLog"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The total number of matching log entries, capped at 1000.
+        tookMs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The time taken to query the logs in milliseconds.
 
     # Request schema for events
     EventsQueryRequest:
