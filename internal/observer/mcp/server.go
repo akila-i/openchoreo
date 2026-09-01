@@ -458,6 +458,70 @@ func registerTools(s *mcpsdk.Server, handler *MCPHandler) {
 		)
 		return handleToolResult(result, err)
 	})
+
+	// Tool 12: query_platform_logs
+	mcpsdk.AddTool(s, &mcpsdk.Tool{
+		Name: "query_platform_logs",
+		Description: "Query platform logs - the logs of OpenChoreo's own components, not of user " +
+			"workloads. Covers the control-plane controller-manager, openchoreo-api and " +
+			"cluster-gateway, the per-plane cluster agents, the observability-plane observer and " +
+			"agents, and the gateway proxies. Use this to investigate OpenChoreo itself: a stuck " +
+			"reconcile, a failing API server, a crash-looping cluster agent. Use " +
+			"query_component_logs instead for logs of a deployed component. Exactly one plane is " +
+			"queried at a time. Requires operator-level access, and does not cover kube-system.",
+		InputSchema: createSchema(map[string]any{
+			"plane_kind": enumStringProperty(
+				"Which plane to query (required). Use 'ControlPlane' for the control plane, which "+
+					"is a singleton and takes no plane_name. Use 'Other' for components OpenChoreo "+
+					"depends on but does not ship, such as cert-manager or external-secrets, which "+
+					"carry no plane attribution.",
+				planeKindNames()),
+			"plane_name": stringProperty("Name of the plane resource. Required for every plane_kind " +
+				"except ControlPlane and Other."),
+			"plane_namespace": stringProperty("Namespace of the plane resource. Required for the " +
+				"namespace-scoped kinds (DataPlane, WorkflowPlane, ObservabilityPlane). This is the " +
+				"namespace the plane resource lives in, which is not the namespace of the pods whose " +
+				"logs are returned - see 'namespaces' for that."),
+			"cluster_instance": stringProperty("Cluster the logs were collected from. For " +
+				"plane_kind 'Other' this is the only way to narrow the scope, since the same " +
+				"namespace name exists on several clusters."),
+			"namespaces":      arrayProperty("Kubernetes namespaces of the platform pods to filter by"),
+			"pod_names":       arrayProperty("Pod names to filter by"),
+			"container_names": arrayProperty("Container names to filter by"),
+			"start_time":      stringProperty("Start of time range in RFC3339 format (e.g., 2025-11-04T08:29:02.452Z)"),
+			"end_time":        stringProperty("End of time range in RFC3339 format (e.g., 2025-11-04T09:29:02.452Z)"),
+			"search_phrase":   stringProperty("Text to search within log messages"),
+			"labels": stringProperty("Kubernetes label selector applied to the pod labels, e.g. " +
+				"'app.kubernetes.io/component=controller-manager'"),
+			"limit":      limitLogsProperty(),
+			"sort_order": sortOrderProperty(),
+		}, []string{"plane_kind", "start_time", "end_time"}),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest, args struct {
+		PlaneKind       string   `json:"plane_kind"`
+		PlaneName       string   `json:"plane_name"`
+		PlaneNamespace  string   `json:"plane_namespace"`
+		ClusterInstance string   `json:"cluster_instance"`
+		Namespaces      []string `json:"namespaces"`
+		PodNames        []string `json:"pod_names"`
+		ContainerNames  []string `json:"container_names"`
+		StartTime       string   `json:"start_time"`
+		EndTime         string   `json:"end_time"`
+		SearchPhrase    string   `json:"search_phrase"`
+		Labels          string   `json:"labels"`
+		Limit           int      `json:"limit"`
+		SortOrder       string   `json:"sort_order"`
+	}) (*mcpsdk.CallToolResult, any, error) {
+		if err := validatePlatformScope(args.PlaneKind, args.PlaneName, args.PlaneNamespace); err != nil {
+			return nil, nil, err
+		}
+		result, err := handler.QueryPlatformLogs(ctx,
+			args.PlaneKind, args.PlaneName, args.PlaneNamespace, args.ClusterInstance,
+			args.Namespaces, args.PodNames, args.ContainerNames,
+			args.StartTime, args.EndTime, args.SearchPhrase, args.Labels,
+			args.Limit, args.SortOrder,
+		)
+		return handleToolResult(result, err)
+	})
 }
 
 // Helper functions for schema creation
@@ -494,6 +558,14 @@ func limitProperty() map[string]any {
 	return map[string]any{
 		"type":        "number",
 		"description": "Maximum number of entries to return. Default: 100",
+	}
+}
+
+func enumStringProperty(description string, values []string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": description,
+		"enum":        values,
 	}
 }
 

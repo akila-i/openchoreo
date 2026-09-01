@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/openchoreo/openchoreo/internal/observer/types"
 )
 
 var granularityPattern = regexp.MustCompile(`^[1-9][0-9]*[hdw]$`)
@@ -66,6 +68,65 @@ func validateFinOpsScope(namespace, environment, project, component string) erro
 		return fmt.Errorf("project is required when component is provided")
 	}
 	return nil
+}
+
+// validatePlatformScope validates the plane coordinates for a platform logs query. It mirrors the
+// REST validator: the control plane is a singleton and "Other" is the absence of a plane, so
+// neither takes a name; the namespace-scoped kinds additionally need the CR's namespace.
+func validatePlatformScope(planeKind, planeName, planeNamespace string) error {
+	req := &types.PlatformLogsQueryRequest{
+		PlaneKind:      types.PlaneKind(planeKind),
+		PlaneName:      planeName,
+		PlaneNamespace: planeNamespace,
+	}
+
+	if planeKind == "" {
+		return fmt.Errorf("plane_kind is required")
+	}
+	if _, ok := validPlaneKinds[req.PlaneKind]; !ok {
+		return fmt.Errorf("plane_kind %q is not a valid plane kind", planeKind)
+	}
+
+	if !req.IsPlaneNameRequired() {
+		if planeName != "" {
+			return fmt.Errorf("plane_name is not applicable for plane_kind %s", planeKind)
+		}
+		return nil
+	}
+	if planeName == "" {
+		return fmt.Errorf("plane_name is required for plane_kind %s", planeKind)
+	}
+	if req.IsPlaneNamespaced() && planeNamespace == "" {
+		return fmt.Errorf("plane_namespace is required for plane_kind %s", planeKind)
+	}
+	return nil
+}
+
+// validPlaneKinds is the set accepted by the platform logs tool, kept in one place so the tool
+// schema's enum and this validator cannot drift apart.
+var validPlaneKinds = map[types.PlaneKind]struct{}{
+	types.PlaneKindControlPlane:              {},
+	types.PlaneKindDataPlane:                 {},
+	types.PlaneKindClusterDataPlane:          {},
+	types.PlaneKindWorkflowPlane:             {},
+	types.PlaneKindClusterWorkflowPlane:      {},
+	types.PlaneKindObservabilityPlane:        {},
+	types.PlaneKindClusterObservabilityPlane: {},
+	types.PlaneKindOther:                     {},
+}
+
+// planeKindNames returns the accepted plane kinds as strings, for the tool schema enum.
+func planeKindNames() []string {
+	return []string{
+		string(types.PlaneKindControlPlane),
+		string(types.PlaneKindDataPlane),
+		string(types.PlaneKindClusterDataPlane),
+		string(types.PlaneKindWorkflowPlane),
+		string(types.PlaneKindClusterWorkflowPlane),
+		string(types.PlaneKindObservabilityPlane),
+		string(types.PlaneKindClusterObservabilityPlane),
+		string(types.PlaneKindOther),
+	}
 }
 
 func validateGranularity(granularity string) error {

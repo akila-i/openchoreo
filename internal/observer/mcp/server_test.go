@@ -331,6 +331,37 @@ func (m *MockFinOpsQuerier) reset() {
 	m.recommendationsRequests = nil
 }
 
+type MockPlatformLogsQuerier struct {
+	requests []*types.PlatformLogsQueryRequest
+	response *types.PlatformLogsResponse
+	queryErr error
+}
+
+func NewMockPlatformLogsQuerier() *MockPlatformLogsQuerier {
+	return &MockPlatformLogsQuerier{response: &types.PlatformLogsResponse{Logs: []types.PlatformLog{}}}
+}
+
+func (m *MockPlatformLogsQuerier) QueryPlatformLogs(
+	_ context.Context, req *types.PlatformLogsQueryRequest,
+) (*types.PlatformLogsResponse, error) {
+	m.requests = append(m.requests, req)
+	if m.queryErr != nil {
+		return nil, m.queryErr
+	}
+	return m.response, nil
+}
+
+func (m *MockPlatformLogsQuerier) lastRequest() *types.PlatformLogsQueryRequest {
+	if len(m.requests) == 0 {
+		return nil
+	}
+	return m.requests[len(m.requests)-1]
+}
+
+func (m *MockPlatformLogsQuerier) reset() {
+	m.requests = nil
+}
+
 // ---- Test harness ----
 
 type testServices struct {
@@ -340,6 +371,7 @@ type testServices struct {
 	traces          *MockTracesQuerier
 	alertsIncidents *MockAlertIncidentService
 	finops          *MockFinOpsQuerier
+	platformLogs    *MockPlatformLogsQuerier
 }
 
 func newTestServices() *testServices {
@@ -350,6 +382,7 @@ func newTestServices() *testServices {
 		traces:          NewMockTracesQuerier(),
 		alertsIncidents: NewMockAlertIncidentService(),
 		finops:          NewMockFinOpsQuerier(),
+		platformLogs:    NewMockPlatformLogsQuerier(),
 	}
 }
 
@@ -360,6 +393,7 @@ func (s *testServices) resetAll() {
 	s.traces.reset()
 	s.alertsIncidents.reset()
 	s.finops.reset()
+	s.platformLogs.reset()
 }
 
 func buildMCPHandler(svcs *testServices) (*MCPHandler, error) {
@@ -368,7 +402,8 @@ func buildMCPHandler(svcs *testServices) (*MCPHandler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMCPHandler(healthSvc, svcs.logs, svcs.events, svcs.metrics, svcs.alertsIncidents, svcs.traces, svcs.finops, logger)
+	return NewMCPHandler(healthSvc, svcs.logs, svcs.events, svcs.metrics, svcs.alertsIncidents, svcs.traces,
+		svcs.finops, svcs.platformLogs, logger)
 }
 
 func setupTestServer(t *testing.T) (*mcpsdk.ClientSession, *testServices) {
@@ -818,6 +853,56 @@ var allToolSpecs = []toolTestSpec{
 			assert.Equal(t, testEndTime, req.EndTime)
 		},
 	},
+	{
+		name:                "query_platform_logs",
+		descriptionKeywords: []string{"platform", "OpenChoreo"},
+		descriptionMinLen:   20,
+		requiredParams:      []string{"plane_kind", "start_time", "end_time"},
+		optionalParams: []string{
+			"plane_name", "plane_namespace", "cluster_instance", "namespaces", "pod_names",
+			"container_names", "search_phrase", "labels", "limit", "sort_order",
+		},
+		testArgs: map[string]any{
+			"plane_kind":       "DataPlane",
+			"plane_name":       "eu-dp",
+			"plane_namespace":  testNamespace,
+			"cluster_instance": "cluster1",
+			"namespaces":       []any{"openchoreo-data-plane"},
+			"pod_names":        []any{"cluster-agent-dataplane-abc"},
+			"container_names":  []any{"agent"},
+			"start_time":       testStartTime,
+			"end_time":         testEndTime,
+			"search_phrase":    "connection refused",
+			"labels":           "app.kubernetes.io/component=cluster-agent",
+			"limit":            50,
+			"sort_order":       sortOrderAsc,
+		},
+		validateCall: func(t *testing.T, svcs *testServices) {
+			t.Helper()
+			req := svcs.platformLogs.lastRequest()
+			require.NotNil(t, req, "Expected QueryPlatformLogs to be called")
+			assert.Equal(t, types.PlaneKindDataPlane, req.PlaneKind)
+			assert.Equal(t, "eu-dp", req.PlaneName)
+			// plane_namespace is the plane CR's namespace, distinct from the pod namespace filter.
+			assert.Equal(t, testNamespace, req.PlaneNamespace)
+			assert.Equal(t, "cluster1", req.ClusterInstance)
+			if diff := cmp.Diff([]string{"openchoreo-data-plane"}, req.Namespaces); diff != "" {
+				t.Errorf("namespaces mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff([]string{"cluster-agent-dataplane-abc"}, req.PodNames); diff != "" {
+				t.Errorf("pod_names mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff([]string{"agent"}, req.ContainerNames); diff != "" {
+				t.Errorf("container_names mismatch (-want +got):\n%s", diff)
+			}
+			assert.Equal(t, testStartTime, req.StartTime)
+			assert.Equal(t, testEndTime, req.EndTime)
+			assert.Equal(t, "connection refused", req.SearchPhrase)
+			assert.Equal(t, "app.kubernetes.io/component=cluster-agent", req.Labels)
+			assert.Equal(t, 50, req.Limit)
+			assert.Equal(t, sortOrderAsc, req.SortOrder)
+		},
+	},
 }
 
 // ---- Tests ----
@@ -832,6 +917,7 @@ func TestNewMCPHandlerValidation(t *testing.T) {
 	metrics := NewMockMetricsQuerier()
 	traces := NewMockTracesQuerier()
 	finops := NewMockFinOpsQuerier()
+	platform := NewMockPlatformLogsQuerier()
 
 	tests := []struct {
 		name                 string
@@ -842,21 +928,24 @@ func TestNewMCPHandlerValidation(t *testing.T) {
 		alertIncidentService service.AlertIncidentService
 		traces               service.TracesQuerier
 		finops               service.FinOpsQuerier
+		platform             service.PlatformLogsQuerier
 		log                  *slog.Logger
 	}{
-		{"nil healthService", nil, logs, events, metrics, alertIncidentSvc, traces, finops, logger},
-		{"nil logsService", healthSvc, nil, events, metrics, alertIncidentSvc, traces, finops, logger},
-		{"nil eventsService", healthSvc, logs, nil, metrics, alertIncidentSvc, traces, finops, logger},
-		{"nil metricsService", healthSvc, logs, events, nil, alertIncidentSvc, traces, finops, logger},
-		{"nil alertIncidentService", healthSvc, logs, events, metrics, nil, traces, finops, logger},
-		{"nil tracesService", healthSvc, logs, events, metrics, alertIncidentSvc, nil, finops, logger},
-		{"nil finopsService", healthSvc, logs, events, metrics, alertIncidentSvc, traces, nil, logger},
-		{"nil logger", healthSvc, logs, events, metrics, alertIncidentSvc, traces, finops, nil},
+		{"nil healthService", nil, logs, events, metrics, alertIncidentSvc, traces, finops, platform, logger},
+		{"nil logsService", healthSvc, nil, events, metrics, alertIncidentSvc, traces, finops, platform, logger},
+		{"nil eventsService", healthSvc, logs, nil, metrics, alertIncidentSvc, traces, finops, platform, logger},
+		{"nil metricsService", healthSvc, logs, events, nil, alertIncidentSvc, traces, finops, platform, logger},
+		{"nil alertIncidentService", healthSvc, logs, events, metrics, nil, traces, finops, platform, logger},
+		{"nil tracesService", healthSvc, logs, events, metrics, alertIncidentSvc, nil, finops, platform, logger},
+		{"nil finopsService", healthSvc, logs, events, metrics, alertIncidentSvc, traces, nil, platform, logger},
+		{"nil platformLogsService", healthSvc, logs, events, metrics, alertIncidentSvc, traces, finops, nil, logger},
+		{"nil logger", healthSvc, logs, events, metrics, alertIncidentSvc, traces, finops, platform, nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewMCPHandler(tt.health, tt.logs, tt.events, tt.metrics, tt.alertIncidentService, tt.traces, tt.finops, tt.log)
+			_, err := NewMCPHandler(tt.health, tt.logs, tt.events, tt.metrics, tt.alertIncidentService, tt.traces,
+				tt.finops, tt.platform, tt.log)
 			require.Error(t, err, "Expected error for %s", tt.name)
 		})
 	}
@@ -1551,6 +1640,21 @@ func TestSchemaPropertyTypes(t *testing.T) {
 	require.NoError(t, err, "Failed to list tools")
 
 	expectedTypes := map[string]map[string]string{
+		"query_platform_logs": {
+			"plane_kind":       "string",
+			"plane_name":       "string",
+			"plane_namespace":  "string",
+			"cluster_instance": "string",
+			"namespaces":       "array",
+			"pod_names":        "array",
+			"container_names":  "array",
+			"start_time":       "string",
+			"end_time":         "string",
+			"search_phrase":    "string",
+			"labels":           "string",
+			"limit":            "number",
+			"sort_order":       "string",
+		},
 		"query_component_logs": {
 			"namespace":     "string",
 			"project":       "string",

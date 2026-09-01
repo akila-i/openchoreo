@@ -44,12 +44,13 @@ const (
 	obsMCPAuthzLabelKey = "e2e-obsmcp/run"
 )
 
-// allObserverTools is the exact set of 11 tools the observer MCP server
+// allObserverTools is the exact set of 14 tools the observer MCP server
 // registers (internal/observer/mcp/server.go). Pinned here so O3 catches an
 // accidental add/remove.
 var allObserverTools = []string{
 	"query_component_logs",
 	"query_workflow_logs",
+	"query_platform_logs",
 	"query_component_events",
 	"query_workflow_events",
 	"query_resource_metrics",
@@ -59,6 +60,8 @@ var allObserverTools = []string{
 	"get_span_details",
 	"query_alerts",
 	"query_incidents",
+	"query_costs",
+	"query_recommendations",
 }
 
 var _ = Describe("Observer MCP", Ordered, Label("tier3"), func() {

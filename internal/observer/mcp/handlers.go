@@ -21,6 +21,7 @@ type MCPHandler struct {
 	alertIncidentService service.AlertIncidentService
 	tracesService        service.TracesQuerier
 	finopsService        service.FinOpsQuerier
+	platformLogsService  service.PlatformLogsQuerier
 	logger               *slog.Logger
 }
 
@@ -32,6 +33,7 @@ func NewMCPHandler(
 	alertIncidentService service.AlertIncidentService,
 	tracesService service.TracesQuerier,
 	finopsService service.FinOpsQuerier,
+	platformLogsService service.PlatformLogsQuerier,
 	logger *slog.Logger,
 ) (*MCPHandler, error) {
 	if healthService == nil {
@@ -55,6 +57,9 @@ func NewMCPHandler(
 	if finopsService == nil {
 		return nil, fmt.Errorf("missing finopsService")
 	}
+	if platformLogsService == nil {
+		return nil, fmt.Errorf("missing platformLogsService")
+	}
 	if logger == nil {
 		return nil, fmt.Errorf("missing logger")
 	}
@@ -66,6 +71,7 @@ func NewMCPHandler(
 		alertIncidentService: alertIncidentService,
 		tracesService:        tracesService,
 		finopsService:        finopsService,
+		platformLogsService:  platformLogsService,
 		logger:               logger,
 	}, nil
 }
@@ -111,6 +117,30 @@ func (h *MCPHandler) QueryWorkflowLogs(ctx context.Context, namespace, workflowR
 		SortOrder:    sortOrder,
 	}
 	return h.logsService.QueryLogs(ctx, req)
+}
+
+// QueryPlatformLogs queries logs of OpenChoreo's own components for one plane.
+func (h *MCPHandler) QueryPlatformLogs(ctx context.Context,
+	planeKind, planeName, planeNamespace, clusterInstance string,
+	namespaces, podNames, containerNames []string,
+	startTime, endTime, searchPhrase, labels string, limit int, sortOrder string) (any, error) {
+	limit, sortOrder, _ = setDefaults(limit, sortOrder, nil)
+	req := &types.PlatformLogsQueryRequest{
+		PlaneKind:       types.PlaneKind(planeKind),
+		PlaneName:       planeName,
+		PlaneNamespace:  planeNamespace,
+		ClusterInstance: clusterInstance,
+		Namespaces:      namespaces,
+		PodNames:        podNames,
+		ContainerNames:  containerNames,
+		StartTime:       startTime,
+		EndTime:         endTime,
+		SearchPhrase:    searchPhrase,
+		Labels:          labels,
+		Limit:           limit,
+		SortOrder:       sortOrder,
+	}
+	return h.platformLogsService.QueryPlatformLogs(ctx, req)
 }
 
 func (h *MCPHandler) QueryComponentEvents(ctx context.Context, namespace, project, component, environment,

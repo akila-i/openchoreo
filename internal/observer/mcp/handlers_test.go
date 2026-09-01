@@ -99,6 +99,65 @@ func TestQueryWorkflowLogs(t *testing.T) {
 	})
 }
 
+func TestQueryPlatformLogs(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("forwards the plane scope to the platform logs service", func(t *testing.T) {
+		svc := mocks.NewMockPlatformLogsQuerier(t)
+		svc.EXPECT().
+			QueryPlatformLogs(mock.Anything, mock.MatchedBy(func(req *types.PlatformLogsQueryRequest) bool {
+				return req.PlaneKind == types.PlaneKindClusterDataPlane &&
+					req.PlaneName == "shared-dp" &&
+					req.PlaneNamespace == "" &&
+					req.ClusterInstance == "cluster2" &&
+					len(req.Namespaces) == 1 && req.Namespaces[0] == "openchoreo-data-plane" &&
+					len(req.PodNames) == 1 && req.PodNames[0] == "cluster-agent-abc" &&
+					len(req.ContainerNames) == 1 && req.ContainerNames[0] == "agent" &&
+					req.StartTime == testStartTime &&
+					req.EndTime == testEndTime &&
+					req.SearchPhrase == "refused" &&
+					req.Labels == "app=cluster-agent" &&
+					req.Limit == 50 &&
+					req.SortOrder == sortOrderAsc
+			})).
+			Return(&types.PlatformLogsResponse{}, nil)
+
+		h := newTestMCPHandler(t, withPlatformLogsService(svc))
+		_, err := h.QueryPlatformLogs(ctx,
+			string(types.PlaneKindClusterDataPlane), "shared-dp", "", "cluster2",
+			[]string{"openchoreo-data-plane"}, []string{"cluster-agent-abc"}, []string{"agent"},
+			testStartTime, testEndTime, "refused", "app=cluster-agent", 50, sortOrderAsc)
+		require.NoError(t, err)
+	})
+
+	t.Run("zero limit and empty sort use defaults", func(t *testing.T) {
+		svc := mocks.NewMockPlatformLogsQuerier(t)
+		svc.EXPECT().
+			QueryPlatformLogs(mock.Anything, mock.MatchedBy(func(req *types.PlatformLogsQueryRequest) bool {
+				return req.Limit == 100 && req.SortOrder == sortOrderDesc
+			})).
+			Return(&types.PlatformLogsResponse{}, nil)
+
+		h := newTestMCPHandler(t, withPlatformLogsService(svc))
+		_, err := h.QueryPlatformLogs(ctx,
+			string(types.PlaneKindControlPlane), "", "", "",
+			nil, nil, nil, testStartTime, testEndTime, "", "", 0, "")
+		require.NoError(t, err)
+	})
+
+	t.Run("service errors propagate", func(t *testing.T) {
+		svc := mocks.NewMockPlatformLogsQuerier(t)
+		svc.EXPECT().QueryPlatformLogs(mock.Anything, mock.Anything).
+			Return(nil, errors.New("adapter down"))
+
+		h := newTestMCPHandler(t, withPlatformLogsService(svc))
+		_, err := h.QueryPlatformLogs(ctx,
+			string(types.PlaneKindControlPlane), "", "", "",
+			nil, nil, nil, testStartTime, testEndTime, "", "", 0, "")
+		require.Error(t, err)
+	})
+}
+
 func TestQueryResourceMetrics(t *testing.T) {
 	ctx := context.Background()
 

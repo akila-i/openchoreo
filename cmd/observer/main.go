@@ -325,6 +325,7 @@ func main() {
 		authzAlertIncidentService,
 		authzTracesService,
 		authzFinOpsService,
+		authzPlatformLogsService,
 		logger.With("component", "mcp-handler"),
 	)
 	if err != nil {
