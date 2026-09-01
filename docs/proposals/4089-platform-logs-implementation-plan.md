@@ -29,7 +29,7 @@ Sub-tasks [#4554](https://github.com/openchoreo/openchoreo/issues/4554),
 |---|---|---|---|
 | WS1 — identity labels on plane pods | #4554 | **Done** | `d22d8428f` |
 | WS2 — `platformObservabilityPlaneRef` + CP discoverability | #4559 | **Done** | `e08cb3c64` |
-| WS3 — observer + adapter contracts | #4556 / #4557 | Not started | |
+| WS3 — observer + adapter contracts | #4556 / #4557 | **Done** | `33e95a55a` |
 | WS4 — observer implementation + authz | #4556 | Not started | |
 | WS5 — `query_platform_logs` MCP tool | #4560 | Not started | |
 
@@ -353,6 +353,8 @@ field.
 
 ### WS3 — Contracts (spec half of #4556 and #4557)
 
+**Status: done** — commit `33e95a55a`. See [As implemented](#ws3-as-implemented).
+
 Land the **observer spec first**, then the adapter spec, so the shapes agree.
 
 #### `openapi/observer-api.yaml` — `GET /api/v1alpha1/platform-logs`
@@ -422,6 +424,27 @@ Response `PlatformLogsResponse` — same shape as the observer's.
 > and it drives a `strict-server` interface. A new path adds a method to `StrictServerInterface`, so each
 > module fails to compile the next time it regenerates until it implements it. Land 501 stubs in the
 > modules promptly after merging this spec.
+
+<a id="ws3-as-implemented"></a>
+#### As implemented
+
+1. **Two enums, not one.** `planeKind` on the request accepts the seven CR kinds plus `Other`,
+   because a plane *name* is ambiguous without knowing which CR it names. But the pod label
+   vocabulary is only four values, so `PlatformLog.planeKind` and the adapter's `scope.plane` are
+   typed to the collapsed four and the observer does the collapse. The plan treated this as one
+   enum; it is two, and WS4 owns the mapping.
+2. **`planeNamespace` vs `namespace`.** Called out in the plan and worth repeating, because the
+   generated `GetPlatformLogsParams` now has both and they are one letter apart in meaning: the
+   plane CR's namespace, and the platform pod's namespace.
+3. **The adapter path declares no `403`**, unlike `/api/v1/logs/query`. Authorization for platform
+   scope happens at the observer, and the real boundary is the namespace allowlist on the collector
+   rather than the pod labels. Omitting 403 reinforces that instead of inviting five module authors
+   to each invent one. The adapter description states the rule outright.
+4. **What WS4 will call**: `logsadapterclientgen.ClientWithResponses.QueryPlatformLogsWithResponse`,
+   with `PlatformLogsQueryRequest` / `PlatformSearchScope`. The observer's own
+   `GetPlatformLogsParams` documents the request contract but is not wired into routing, since the
+   observer hand-registers routes rather than using the generated server.
+5. **`make mockery-gen` again.** Same trap as WS2 — regenerate after touching either spec.
 
 ---
 
