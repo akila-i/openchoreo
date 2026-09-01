@@ -567,26 +567,74 @@ specs are strictly ordered. WS5 is blocked on WS4.
 
 ---
 
-## What remains before this is usable end to end
+## The collection half (openchoreo/community-modules)
 
-Every workstream in this repo is done, but platform logs do not flow yet: nothing collects them.
-The blocking work is all in `openchoreo/community-modules`, in this order:
+`observability-logs-opensearch` now implements the whole path — commit `8984299` on the
+`system-obs` branch of that repo. Collection is namespace-gated into `platform-logs-*` with its own
+index template and retention, and the adapter serves `POST /api/v1alpha1/platform-logs/query`.
 
-1. **501 stubs for `POST /api/v1alpha1/platform-logs/query`** in all five logs modules. Their
-   Makefiles fetch the adapter spec from `main`, and it drives a `strict-server` interface, so each
-   module fails to compile the next time it regenerates until the method exists.
-2. **The namespace-gated collection path** (#4555 and the Azure/GCP splits), plus the required
-   `clusterInstance` value on each collector — without it, two clusters running the default
-   `planeID` are indistinguishable.
+Worth carrying to the other modules:
+
+- **The workload index template could not be reused.** `container-logs-*` is `dynamic: false` with
+  a *workload* label allowlist, so platform labels would be stored but not queryable. The platform
+  index needs its own template listing `openchoreo.dev/plane`, `plane-id` and the
+  collector-stamped `cluster-instance`.
+- **Platform namespaces are excluded from the workload input**, so enabling this *moves* those
+  records rather than duplicating them. Storing them twice would undercut the reason the feature is
+  opt-in.
+- **`clusterInstance` fails the install when unset**, and an empty entry in the namespace list is
+  rejected too — it renders a glob matching nothing, so the namespace it was meant to name would be
+  silently uncollected.
+- **`SPEC` in each module's Makefile should be `?=`**, so the adapter can be generated against a
+  branch while a contract change is still in review.
+
+### Still to do there
+
+1. **501 stubs** for the endpoint in `openobserve`, `aws-cloudwatch`, `azure-loganalytics` and
+   `gcp-cloudlogging`. Their Makefiles fetch the adapter spec from `main` and it drives a
+   `strict-server` interface, so each fails to compile on its next regen until the method exists.
+2. **Collection** for the remaining backends (#4555 and the Azure DCR / GCP Log Router splits).
 3. **Query implementations** behind those stubs (#4557).
 
-Note the OpenSearch module needs its index template changed as well as its collector config: the
-`container-logs-*` template is `"dynamic": false` with an OpenChoreo-label allowlist
-(`init/setup-opensearch.sh:60-142`), so platform pod labels are stored but not indexed. OpenObserve
-has a dynamic schema and is what `make/e2e.mk` already installs, so it is the cheaper first backend.
+## Running the end-to-end check
 
-Also still open from WS1: whether kgateway copies `spec.infrastructure.labels` onto the proxy
-Deployment's *selector*. That needs a cluster to answer and is the one unverified claim in this work.
+Both halves are on `system-obs` branches, so a local run needs both worktrees deployed. The
+contract between them is already verified statically: the observer's request body decodes into the
+adapter's generated types, through the handler, and the response decodes back into the observer's
+response struct with attribution intact.
+
+```bash
+# 1. control plane + planes, with the new labels and CRD field
+make k3d.update                     # from the openchoreo worktree
+
+# 2. the module, with platform collection on
+helm upgrade observability-logs-opensearch <path-to-module>/helm \
+  --namespace openchoreo-observability-plane --reuse-values \
+  --set fluent-bit.enabled=true \
+  --set platformLogs.enabled=true --set platformLogs.clusterInstance=local
+
+# 3. confirm the labels reached the pods
+kubectl get pods -A -l openchoreo.dev/plane=controlplane --show-labels
+
+# 4. query, as a subject holding platformlogs:view
+curl -H "Authorization: Bearer $TOKEN" \
+  "$OBSERVER/api/v1alpha1/platform-logs?planeKind=ControlPlane\
+&startTime=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)&endTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+Expect the control plane to return logs with `planeKind: controlplane` and no `planeId` (it is a
+singleton), a data plane to return `planeId` matching its `clusterAgent.planeID`, and
+`planeKind=Other` to return nothing until an external chart's namespace is added to
+`platformLogs.namespaces`.
+
+Two things a first run will not show, both expected: `dp-*` logs are absent from platform logs by
+construction, and the argo-workflows subchart pods are unattributed.
+
+## Still unverified
+
+Whether kgateway copies `spec.infrastructure.labels` onto the proxy Deployment's *selector*. That
+needs a cluster to answer and is the one unverified claim in this work — step 3 above is where it
+would show up, as a failed `helm upgrade` on an existing gateway.
 
 ---
 
